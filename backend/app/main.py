@@ -26,3 +26,5 @@ def health():
     return {"status": "ok"}
 
 app.include_router(users_router)
+from app.documents.router import router as documents_router
+app.include_router(documents_router)

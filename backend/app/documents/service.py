@@ -110,8 +110,12 @@ def transition(conn, doc_id, to_state: DocState, actor: Actor, note: str | None 
                 raise HTTPException(409, "Document has no lawyer sign-off; delivery blocked")
 
         updated = conn.execute(
-            "update documents set state = %s, draft_for_settlement = %s where id = %s returning *",
-            (to_state.value, draft_flag, doc_id),
+            """update documents
+               set state = %s,
+                   draft_for_settlement = %s,
+                   queued_at = case when %s::boolean then now() else queued_at end
+               where id = %s returning *""",
+            (to_state.value, draft_flag, to_state == DocState.PENDING_LAWYER_REVIEW, doc_id),
         ).fetchone()
 
         write_audit(

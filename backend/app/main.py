@@ -28,3 +28,5 @@ def health():
 app.include_router(users_router)
 from app.documents.router import router as documents_router
 app.include_router(documents_router)
+from app.lawyer_queue.router import router as queue_router
+app.include_router(queue_router)

@@ -1,0 +1,52 @@
+[
+  {
+    "clause_type": "nda_scope",
+    "contract_types": ["nda"],
+    "favoured_party": "neutral",
+    "statute_refs": [],
+    "title": "Standard NDA Scope [PLACEHOLDER]",
+    "content": "Each party agrees to keep confidential all Confidential Information disclosed by the other party under this Agreement and shall not disclose such information to any third party without prior written consent.",
+    "verification_status": "staging",
+    "notes": "PLACEHOLDER — not lawyer-verified. Never use in output shown to clients."
+  },
+  {
+    "clause_type": "payment_terms",
+    "contract_types": ["vendor_supplier"],
+    "favoured_party": "party_a",
+    "statute_refs": ["MSMED_s15"],
+    "title": "45-Day Payment Term — MSMED Override [PLACEHOLDER]",
+    "content": "Payment shall be made within 45 days of receipt of a valid invoice. In the event of delayed payment, interest shall accrue at the rate prescribed under the MSMED Act, 2006.",
+    "verification_status": "staging",
+    "notes": "PLACEHOLDER — MSMED s.15-16 payment term. Requires lawyer verification before use."
+  },
+  {
+    "clause_type": "termination_for_convenience",
+    "contract_types": ["vendor_supplier", "msa"],
+    "favoured_party": "party_a",
+    "statute_refs": [],
+    "title": "Termination for Convenience — 30 Days [PLACEHOLDER]",
+    "content": "Either party may terminate this Agreement for any reason upon 30 days prior written notice to the other party. All obligations accrued prior to the termination date shall survive.",
+    "verification_status": "staging",
+    "notes": "PLACEHOLDER — standard termination clause. Notice period to be confirmed per contract type."
+  },
+  {
+    "clause_type": "indemnity",
+    "contract_types": ["vendor_supplier", "msa", "nda"],
+    "favoured_party": "party_a",
+    "statute_refs": ["ICA_s74"],
+    "title": "Mutual Indemnity [PLACEHOLDER]",
+    "content": "Each party shall indemnify and hold harmless the other party from and against any claims, damages, losses, and expenses arising out of or related to the indemnifying party's breach of this Agreement.",
+    "verification_status": "staging",
+    "notes": "PLACEHOLDER — ICA s.74 liquidated damages cap implications need lawyer verification."
+  },
+  {
+    "clause_type": "governing_law",
+    "contract_types": ["nda", "vendor_supplier", "founders_agreement", "sha"],
+    "favoured_party": "neutral",
+    "statute_refs": [],
+    "title": "Governing Law — India [PLACEHOLDER]",
+    "content": "This Agreement shall be governed by and construed in accordance with the laws of India. Any disputes arising hereunder shall be subject to the exclusive jurisdiction of the courts at [City], India.",
+    "verification_status": "staging",
+    "notes": "PLACEHOLDER — jurisdiction city must be specified per deal. Do not use as-is."
+  }
+]

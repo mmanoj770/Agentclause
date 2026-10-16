@@ -1,10 +1,11 @@
 """
-D3: Runner script - embeds all clauses that don't have a vector yet.
+D3: Runner script - embeds every clause that is new or out of date.
 
 Run from the backend/ folder:
     python -m app.clauses.embed_runner
 
-Safe to re-run: skips already-embedded clauses automatically.
+Safe to re-run: up-to-date clauses are skipped, and a clause is re-embedded when its
+text, version or the embedding model changes. Prints embedded / skipped / failed counts.
 Exits with code 1 if any clause failed, so failures are never silent.
 """
 
@@ -19,13 +20,12 @@ def main() -> int:
     pool.open()
     try:
         with pool.connection() as conn:
-            print("Checking for unembedded clauses...")
             result = embed_all_pending(conn)
             conn.commit()
     finally:
         pool.close()
 
-    print(f"\nDone - {result.embedded} clause(s) embedded, {len(result.failed)} failed.")
+    print(f"\nDone - {result.summary()}.")
     if result.failed:
         print("Failed clauses (fix the cause, then re-run; successful ones are kept):")
         for clause_id, reason in result.failed:

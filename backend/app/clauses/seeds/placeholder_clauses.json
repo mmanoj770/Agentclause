@@ -1,19 +1,25 @@
 [
   {
-    "clause_type": "nda_scope",
-    "contract_types": ["nda"],
+    "clause_type": "confidentiality",
+    "contract_types": [
+      "nda"
+    ],
     "favoured_party": "neutral",
     "statute_refs": [],
-    "title": "Standard NDA Scope [PLACEHOLDER]",
+    "title": "Confidentiality Obligation [PLACEHOLDER]",
     "content": "Each party agrees to keep confidential all Confidential Information disclosed by the other party under this Agreement and shall not disclose such information to any third party without prior written consent.",
     "verification_status": "staging",
     "notes": "PLACEHOLDER — not lawyer-verified. Never use in output shown to clients."
   },
   {
     "clause_type": "payment_terms",
-    "contract_types": ["vendor_supplier"],
+    "contract_types": [
+      "vendor_supplier"
+    ],
     "favoured_party": "party_a",
-    "statute_refs": ["MSMED_s15"],
+    "statute_refs": [
+      "MSMED_s15"
+    ],
     "title": "45-Day Payment Term — MSMED Override [PLACEHOLDER]",
     "content": "Payment shall be made within 45 days of receipt of a valid invoice. In the event of delayed payment, interest shall accrue at the rate prescribed under the MSMED Act, 2006.",
     "verification_status": "staging",
@@ -21,7 +27,10 @@
   },
   {
     "clause_type": "termination_for_convenience",
-    "contract_types": ["vendor_supplier", "msa"],
+    "contract_types": [
+      "vendor_supplier",
+      "msa"
+    ],
     "favoured_party": "party_a",
     "statute_refs": [],
     "title": "Termination for Convenience — 30 Days [PLACEHOLDER]",
@@ -31,9 +40,15 @@
   },
   {
     "clause_type": "indemnity",
-    "contract_types": ["vendor_supplier", "msa", "nda"],
+    "contract_types": [
+      "vendor_supplier",
+      "msa",
+      "nda"
+    ],
     "favoured_party": "party_a",
-    "statute_refs": ["ICA_s74"],
+    "statute_refs": [
+      "ICA_s74"
+    ],
     "title": "Mutual Indemnity [PLACEHOLDER]",
     "content": "Each party shall indemnify and hold harmless the other party from and against any claims, damages, losses, and expenses arising out of or related to the indemnifying party's breach of this Agreement.",
     "verification_status": "staging",
@@ -41,12 +56,94 @@
   },
   {
     "clause_type": "governing_law",
-    "contract_types": ["nda", "vendor_supplier", "founders_agreement", "sha"],
+    "contract_types": [
+      "nda",
+      "vendor_supplier",
+      "founders_agreement",
+      "sha"
+    ],
     "favoured_party": "neutral",
     "statute_refs": [],
     "title": "Governing Law — India [PLACEHOLDER]",
     "content": "This Agreement shall be governed by and construed in accordance with the laws of India. Any disputes arising hereunder shall be subject to the exclusive jurisdiction of the courts at [City], India.",
     "verification_status": "staging",
     "notes": "PLACEHOLDER — jurisdiction city must be specified per deal. Do not use as-is."
+  },
+  {
+    "clause_type": "nda_term",
+    "contract_types": [
+      "nda"
+    ],
+    "favoured_party": "neutral",
+    "statute_refs": [],
+    "title": "Term and Survival [PLACEHOLDER]",
+    "content": "This Agreement shall remain in force for a period of [Term] from the Effective Date. The obligations of confidentiality shall survive for a further period of [Survival Period] after its expiry or termination.",
+    "verification_status": "staging",
+    "notes": "PLACEHOLDER - term and survival periods are deal facts. Requires lawyer verification."
+  },
+  {
+    "clause_type": "return_of_information",
+    "contract_types": [
+      "nda"
+    ],
+    "favoured_party": "neutral",
+    "statute_refs": [],
+    "title": "Return or Destruction of Information [PLACEHOLDER]",
+    "content": "Within 15 days of a written request from the disclosing party, the receiving party shall return or destroy all Confidential Information in its possession and confirm the same in writing.",
+    "verification_status": "staging",
+    "notes": "PLACEHOLDER - return period to be confirmed. Requires lawyer verification."
+  },
+  {
+    "clause_type": "permitted_disclosure",
+    "contract_types": [
+      "nda"
+    ],
+    "favoured_party": "neutral",
+    "statute_refs": [],
+    "title": "Disclosure Required by Law [PLACEHOLDER]",
+    "content": "The receiving party may disclose Confidential Information to the extent required by law or by an order of a court or governmental authority, provided that it gives the disclosing party prompt written notice of such requirement, where legally permitted.",
+    "verification_status": "staging",
+    "notes": "PLACEHOLDER - compelled-disclosure carve-out. Requires lawyer verification."
+  },
+  {
+    "clause_type": "limitation_of_liability",
+    "contract_types": [
+      "vendor_supplier",
+      "msa"
+    ],
+    "favoured_party": "party_a",
+    "statute_refs": [],
+    "title": "Liability Cap [PLACEHOLDER]",
+    "content": "The aggregate liability of either party under this Agreement shall not exceed [Amount], except in the case of fraud, wilful misconduct or breach of confidentiality obligations.",
+    "verification_status": "staging",
+    "notes": "PLACEHOLDER - cap amount is a deal fact; carve-outs need lawyer verification."
+  },
+  {
+    "clause_type": "notices",
+    "contract_types": [
+      "nda",
+      "vendor_supplier",
+      "msa"
+    ],
+    "favoured_party": "neutral",
+    "statute_refs": [],
+    "title": "Notices [PLACEHOLDER]",
+    "content": "All notices under this Agreement shall be in writing and sent to the addresses of the parties set out above, or to such other address as a party may notify in writing. A notice sent by registered post shall be deemed received [Notice Days] after dispatch.",
+    "verification_status": "staging",
+    "notes": "PLACEHOLDER - deemed-receipt period to be confirmed. Requires lawyer verification."
+  },
+  {
+    "clause_type": "dispute_resolution",
+    "contract_types": [
+      "nda",
+      "vendor_supplier",
+      "msa"
+    ],
+    "favoured_party": "neutral",
+    "statute_refs": [],
+    "title": "Arbitration [PLACEHOLDER]",
+    "content": "Any dispute arising out of or in connection with this Agreement shall be referred to arbitration by a sole arbitrator under the Arbitration and Conciliation Act, 1996. The seat of arbitration shall be [City].",
+    "verification_status": "staging",
+    "notes": "PLACEHOLDER - seat is a deal fact; arbitration terms need lawyer verification."
   }
 ]

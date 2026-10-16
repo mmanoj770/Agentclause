@@ -27,7 +27,7 @@ def test_changes_period_keeping_operator_words():
 
 
 def test_no_edits_means_unchanged():
-    clause = retrieved("nda_scope")
+    clause = retrieved("confidentiality")
     r = adapt_clause(clause, deal(), llm=llm_returning())
     assert r.status == AdaptationStatus.unchanged
     assert r.content == clause.content
@@ -53,7 +53,7 @@ def test_no_edits_means_unchanged():
     ({"find": 5, "replace": "x", "fact": "notice_period"}, "strings"),
 ])
 def test_unsafe_edits_rejected(edit, reason_part):
-    clause = retrieved("nda_scope")
+    clause = retrieved("confidentiality")
     r = adapt_clause(clause, deal(), llm=llm_returning(edit))
     assert r.content == clause.content
     assert r.status == AdaptationStatus.fallback_original
@@ -62,7 +62,7 @@ def test_unsafe_edits_rejected(edit, reason_part):
 
 
 def test_ambiguous_find_rejected():
-    clause = retrieved("nda_scope", content="Notice of 30 days. A further 30 days applies.")
+    clause = retrieved("confidentiality", content="Notice of 30 days. A further 30 days applies.")
     r = adapt_clause(clause, deal(),
                      llm=llm_returning({"find": "30 days", "replace": "60 days", "fact": "notice_period"}))
     assert r.content == clause.content
@@ -79,7 +79,7 @@ def test_dropping_qualifier_rejected():
 
 
 def test_cross_reference_token_protected():
-    clause = retrieved("nda_scope", content="Subject to {{clause:term_30}}, notice of 30 days applies.")
+    clause = retrieved("confidentiality", content="Subject to {{clause:term_30}}, notice of 30 days applies.")
     r = adapt_clause(clause, deal(),
                      llm=llm_returning({"find": "term_30}}, notice of 30", "replace": "60 days",
                                         "fact": "notice_period"}))

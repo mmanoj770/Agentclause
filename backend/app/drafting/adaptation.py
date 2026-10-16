@@ -14,7 +14,7 @@ Every edit is checked by deterministic code before it is applied:
      that fact's exact value.
   3. Apart from the fact value, `replace` may only reuse words that were already
      in `find` - so the model cannot introduce new words, obligations, numbers
-     or statute citations (D7: citations only ever come from clause metadata).
+     or statute citations.
   4. Legal operator words (shall, may, not, exclusive, indemnify, within, ...)
      must appear exactly as often in `replace` as in `find` - so the model
      cannot remove or add an obligation, a negation or a qualifier.
@@ -23,10 +23,19 @@ Every edit is checked by deterministic code before it is applied:
   6. Edits may not overlap.
 Rejected edits are reported with a reason. If the model is unavailable or its
 answer is unusable, the ORIGINAL clause text is kept unchanged and flagged.
+
+Diff against the source (independent second check)
+After the edits are applied, a word-level diff of the adapted text against the
+source clause is computed (`diff`). Every change must be a fact substitution:
+the inserted words must come from one deal fact, and the removed words may only
+be a placeholder, number, period, currency or date. If any change fails this
+check, the original clause is kept. The output always carries the source
+clause_id and version.
 """
 
 from __future__ import annotations
 
+import difflib
 import json
 import re
 from collections import Counter
@@ -120,19 +129,28 @@ class RejectedEdit(BaseModel):
     reason: str
 
 
+class DiffChange(BaseModel):
+    removed: str          # words in the source clause that were replaced ("" if none)
+    inserted: str         # words in the adapted clause that replaced them ("" if none)
+    fact: str | None      # the deal fact this change comes from; None = NOT a fact substitution
+
+
 class AdaptedClause(BaseModel):
+    # Source clause identity is always carried through unchanged.
     clause_id: UUID
+    version: int
     clause_type: str
     title: str
     favoured_party: FavouredParty
     statute_refs: list[str]
-    version: int
     verification_status: VerificationStatus
     original_content: str
     content: str
     status: AdaptationStatus
     edits_applied: list[Edit] = Field(default_factory=list)
     edits_rejected: list[RejectedEdit] = Field(default_factory=list)
+    diff: list[DiffChange] = Field(default_factory=list)  # adapted text vs source clause
+    diff_only_facts: bool = True                          # every change in `diff` is a fact substitution
     unresolved_placeholders: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
 
@@ -143,6 +161,65 @@ def _words(text: str) -> list[str]:
 
 def _norm(text: str) -> str:
     return " ".join(text.split()).casefold()
+
+
+# ---------------------------------------------------------------------------
+# Diff against the source
+# ---------------------------------------------------------------------------
+
+# Placeholders stay one token; words and punctuation are separate tokens.
+DIFF_TOKEN_RE = re.compile(r"\[[^\[\]\n]{1,60}\]|\w+|[^\w\s]")
+
+
+def _diff_tokens(text: str) -> list[str]:
+    return DIFF_TOKEN_RE.findall(text)
+
+
+def _is_sublist(part: list[str], whole: list[str]) -> bool:
+    n = len(part)
+    return n > 0 and any(whole[i:i + n] == part for i in range(len(whole) - n + 1))
+
+
+def _removable(token: str) -> bool:
+    t = token.casefold()
+    return (token.startswith("[") or t[0].isdigit() or t in REPLACEABLE_WORDS
+            or not t[0].isalnum())  # punctuation inside a number, e.g. "5,00,000"
+
+
+def _fact_for_change(removed: list[str], inserted: list[str], facts: dict[str, str]) -> str | None:
+    """The fact key this change substitutes, or None if it is not a pure fact substitution."""
+    if not inserted:
+        return None  # a pure deletion is never a fact substitution
+    if not all(_removable(t) for t in removed):
+        return None  # legal wording was removed
+    ins = [t.casefold() for t in inserted]
+    for key, value in facts.items():
+        if _is_sublist(ins, [t.casefold() for t in _diff_tokens(value)]):
+            return key
+    return None
+
+
+def _span_text(text: str, spans: list[tuple[int, int]], i1: int, i2: int) -> str:
+    """The exact original text covered by tokens i1..i2-1 (spacing preserved)."""
+    return text[spans[i1][0]:spans[i2 - 1][1]] if i2 > i1 else ""
+
+
+def diff_against_source(source: str, adapted: str, facts: dict[str, str]) -> list[DiffChange]:
+    """Word-level diff of the adapted clause against its source, each change matched to a fact."""
+    a_matches, b_matches = list(DIFF_TOKEN_RE.finditer(source)), list(DIFF_TOKEN_RE.finditer(adapted))
+    a, b = [m.group() for m in a_matches], [m.group() for m in b_matches]
+    a_spans, b_spans = [m.span() for m in a_matches], [m.span() for m in b_matches]
+    matcher = difflib.SequenceMatcher(a=a, b=b, autojunk=False)
+    changes: list[DiffChange] = []
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "equal":
+            continue
+        changes.append(DiffChange(
+            removed=_span_text(source, a_spans, i1, i2),
+            inserted=_span_text(adapted, b_spans, j1, j2),
+            fact=_fact_for_change(a[i1:i2], b[j1:j2], facts),
+        ))
+    return changes
 
 
 def _check_edit(raw, original: str, facts: dict[str, str], xref_spans) -> tuple[Edit, int] | str:
@@ -278,10 +355,23 @@ def adapt_clause(
         status = AdaptationStatus.unchanged
 
     applied = [e for _, e in sorted(accepted, key=lambda t: t[0])]
-    return _finish(base, content, status, applied, rejected, warnings)
+
+    # Independent second check: diff the result against the source clause.
+    diff = diff_against_source(original, content, facts)
+    bad = [c for c in diff if c.fact is None]
+    if bad:
+        warnings.append(
+            "Diff check failed - change(s) that are not fact substitutions: "
+            + "; ".join(f"'{c.removed}' -> '{c.inserted}'" for c in bad)
+            + ". Original clause kept."
+        )
+        return _finish(base, original, AdaptationStatus.fallback_original, [], rejected, warnings)
+
+    return _finish(base, content, status, applied, rejected, warnings, diff)
 
 
-def _finish(base, content, status, applied, rejected, warnings) -> AdaptedClause:
+def _finish(base, content, status, applied, rejected, warnings, diff=None) -> AdaptedClause:
+    diff = diff or []
     placeholders = PLACEHOLDER_RE.findall(content)
     if placeholders:
         warnings = warnings + [f"Unfilled placeholder(s) remain: {', '.join(placeholders)}"]
@@ -291,6 +381,8 @@ def _finish(base, content, status, applied, rejected, warnings) -> AdaptedClause
         status=status,
         edits_applied=applied,
         edits_rejected=rejected,
+        diff=diff,
+        diff_only_facts=all(c.fact is not None for c in diff),
         unresolved_placeholders=placeholders,
         warnings=warnings,
     )

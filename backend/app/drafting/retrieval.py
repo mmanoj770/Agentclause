@@ -1,20 +1,24 @@
 """
 D4: Retrieval function.
 
-Queries the clause corpus by contract type, clause type and optional filters,
-and (when a search query is given) ranks results by cosine similarity using the
-pgvector embeddings from D3. Returns the top-k clauses with similarity scores.
+    retrieve_clauses(conn, clause_type, contract_type, query, k)
+
+Filters the clause corpus on metadata (contract type, clause type, optional extras),
+then ranks the matches by cosine similarity between the query and each clause's
+D3 embedding. Each result carries clause_id, version, statute_refs, tier
+(staging / verified) and score.
 
 Accuracy safeguards
 - Exact search: the ivfflat index (lists=10) gives poor recall on a small corpus
   and can silently drop matches when combined with WHERE filters. We set
   ivfflat.probes high enough to scan every list, which makes the search exact.
-- Clauses without an embedding cannot be ranked. They are not silently ignored:
-  the count is reported in `unembedded_matches` and in `warnings`.
+- Only embeddings made by the CURRENT model are compared (vectors from different
+  models are not comparable). Clauses with a missing or outdated embedding are not
+  silently ignored: the count is reported in `unembedded_matches` and `warnings`.
 - If the query embedding cannot be created (no API key, network, quota), the
   function falls back to filter-only results and says so in `warnings`
   instead of crashing.
-- verified_only=True must be used for anything lawyer-facing (see D8).
+- Pass verified_only=True for anything shown to a lawyer or client.
 """
 
 from __future__ import annotations
@@ -22,13 +26,13 @@ from __future__ import annotations
 from typing import Callable
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
-from app.clauses.embedder import EMBEDDING_DIM, get_query_embedding, to_pgvector
+from app.clauses.embedder import EMBEDDING_DIM, current_model, get_query_embedding, to_pgvector
 from app.clauses.models import FavouredParty, VerificationStatus
 from app.gemini import GeminiError
 
-MAX_TOP_K = 50
+MAX_K = 50
 # >= the ivfflat `lists` value in migration 12, so every list is scanned (exact search).
 IVFFLAT_PROBES = 100
 
@@ -43,17 +47,23 @@ class RetrievedClause(BaseModel):
     verification_status: VerificationStatus
     title: str
     content: str
-    # Cosine similarity (1.0 = identical meaning). None when no search query was given.
-    similarity: float | None = None
+    # Cosine similarity to the query (1.0 = same meaning). None when no query was given.
+    score: float | None = None
+
+    @computed_field
+    @property
+    def tier(self) -> str:
+        """Corpus tier: 'staging' (placeholder / unreviewed) or 'verified' (lawyer-approved)."""
+        return str(self.verification_status)
 
 
 class RetrievalResult(BaseModel):
     clauses: list[RetrievedClause] = Field(default_factory=list)
-    unembedded_matches: int = 0  # matching clauses skipped because they have no embedding
+    unembedded_matches: int = 0  # matching clauses not ranked: no embedding from the current model
     warnings: list[str] = Field(default_factory=list)
 
 
-def _clean(value: str | None, name: str) -> str | None:
+def _clean(value, name: str) -> str | None:
     if value is None:
         return None
     if not isinstance(value, str) or not value.strip():
@@ -63,31 +73,31 @@ def _clean(value: str | None, name: str) -> str | None:
 
 def retrieve_clauses(
     conn,
-    *,
+    clause_type: str | None,
     contract_type: str,
-    clause_type: str | None = None,
     query: str | None = None,
-    top_k: int = 5,
+    k: int = 5,
+    *,
     verified_only: bool = False,
     favoured_party: str | None = None,
     statute_ref: str | None = None,
-    min_similarity: float | None = None,
+    min_score: float | None = None,
     embed_query: Callable[[str], list[float]] = get_query_embedding,
 ) -> RetrievalResult:
     """
     Find clauses for a contract.
 
+    clause_type     exact match, e.g. "governing_law"; None = any clause type
     contract_type   required, e.g. "nda" (matches any entry in clauses.contract_types)
-    clause_type     optional exact match, e.g. "governing_law"
-    query           optional free text; when given, results are ranked by similarity
-    top_k           1..50
-    verified_only   True for lawyer-facing use: excludes staging clauses
+    query           free text; when given, results are ranked by similarity score
+    k               number of results, 1..50
+    verified_only   True for lawyer/client-facing use: excludes staging clauses
     favoured_party  optional: "party_a" | "party_b" | "neutral"
     statute_ref     optional: only clauses citing this code, e.g. "ICA_s74"
-    min_similarity  optional threshold (only with query); weaker matches are dropped
+    min_score       optional threshold (only with query); weaker matches are dropped
 
-    Raises ValueError for invalid arguments (programmer error); never raises for
-    embedding/API problems (falls back and reports in warnings).
+    Raises ValueError for invalid arguments; never raises for embedding/API problems
+    (falls back and reports in warnings). An empty result is a valid answer.
     """
     contract_type = _clean(contract_type, "contract_type")
     if contract_type is None:
@@ -98,23 +108,25 @@ def retrieve_clauses(
         if not isinstance(query, str):
             raise ValueError("query must be a string")
         query = query.strip() or None
-    if isinstance(top_k, bool) or not isinstance(top_k, int) or not 1 <= top_k <= MAX_TOP_K:
-        raise ValueError(f"top_k must be an integer between 1 and {MAX_TOP_K}")
+    if isinstance(k, bool) or not isinstance(k, int) or not 1 <= k <= MAX_K:
+        raise ValueError(f"k must be an integer between 1 and {MAX_K}")
     party = FavouredParty(favoured_party).value if favoured_party is not None else None
-    if min_similarity is not None:
+    if min_score is not None:
         if query is None:
-            raise ValueError("min_similarity only applies when a query is given")
-        if not -1.0 <= float(min_similarity) <= 1.0:
-            raise ValueError("min_similarity must be between -1 and 1")
+            raise ValueError("min_score only applies when a query is given")
+        if not -1.0 <= float(min_score) <= 1.0:
+            raise ValueError("min_score must be between -1 and 1")
 
     result = RetrievalResult()
+    model = current_model()
     params = {
         "contract_type": contract_type,
         "clause_type": clause_type,
         "verified_only": bool(verified_only),
         "favoured_party": party,
         "statute_ref": statute_ref,
-        "top_k": top_k,
+        "k": k,
+        "model": model,
     }
     filters = """
         %(contract_type)s = ANY(contract_types)
@@ -129,6 +141,8 @@ def retrieve_clauses(
         statute_refs, version, verification_status::text AS verification_status,
         title, content
     """
+    # An embedding is usable only if it was made by the current model for the current version.
+    usable = "embedding IS NOT NULL AND embedding_model = %(model)s AND embedded_version = version"
 
     query_vector: str | None = None
     if query is not None:
@@ -149,41 +163,41 @@ def retrieve_clauses(
             rows = conn.execute(
                 f"""
                 SELECT {columns},
-                       1 - (embedding <=> %(qvec)s::vector) AS similarity
+                       1 - (embedding <=> %(qvec)s::vector) AS score
                 FROM clauses
-                WHERE {filters} AND embedding IS NOT NULL
+                WHERE {filters} AND {usable}
                 ORDER BY embedding <=> %(qvec)s::vector, clause_id
-                LIMIT %(top_k)s
+                LIMIT %(k)s
                 """,
                 params,
             ).fetchall()
             missing = conn.execute(
-                f"SELECT count(*) AS n FROM clauses WHERE {filters} AND embedding IS NULL",
+                f"SELECT count(*) AS n FROM clauses WHERE {filters} AND NOT ({usable})",
                 params,
             ).fetchone()
             result.unembedded_matches = int(missing["n"])
             if result.unembedded_matches:
                 result.warnings.append(
-                    f"{result.unembedded_matches} matching clause(s) have no embedding and were "
-                    "not ranked. Run: python -m app.clauses.embed_runner"
+                    f"{result.unembedded_matches} matching clause(s) have no up-to-date embedding "
+                    f"from {model} and were not ranked. Run: python -m app.clauses.embed_runner"
                 )
         else:
             # No ranking possible: verified first, newest version first, stable order.
             rows = conn.execute(
                 f"""
-                SELECT {columns}, NULL::float8 AS similarity
+                SELECT {columns}, NULL::float8 AS score
                 FROM clauses
                 WHERE {filters}
                 ORDER BY (verification_status = 'verified') DESC, version DESC,
                          created_at, clause_id
-                LIMIT %(top_k)s
+                LIMIT %(k)s
                 """,
                 params,
             ).fetchall()
 
     clauses = [RetrievedClause(**row) for row in rows]
-    if min_similarity is not None and query_vector is not None:
-        clauses = [c for c in clauses if c.similarity is not None and c.similarity >= min_similarity]
+    if min_score is not None and query_vector is not None:
+        clauses = [c for c in clauses if c.score is not None and c.score >= min_score]
     result.clauses = clauses
     if not clauses:
         result.warnings.append("No clauses matched the given filters.")

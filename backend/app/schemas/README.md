@@ -7,7 +7,7 @@
 | Field | Type | Stored in `findings` as |
 |---|---|---|
 | `finding_id` | UUID, generated if omitted | `id` |
-| `layer` | `Layer`: `STRUCTURAL`, `FUNCTIONAL`, `RISK`, `LEGAL` | `layer` (smallint 0–3) |
+| `layer` | `Layer` (see below) | `layer` (smallint 0–6) |
 | `severity` | `Severity`: `critical`, `high`, `medium`, `low` | `severity` |
 | `clause_reference` | non-empty string | `clause_reference` |
 | `description` | non-empty string | `description` |
@@ -20,13 +20,27 @@
 
 Unknown fields are rejected.
 
+### Layers
+
+Fixed by the SRD and mirrored by the frontend's `PIPELINE_LAYERS`. Never renumber them; the numbers are stored in `findings.layer`.
+
+| Value | `Layer` | Pipeline stage |
+|---|---|---|
+| 0 | `INTAKE` | Intake and normalisation (R2) |
+| 1 | `COMPLETENESS` | Completeness (R3) |
+| 2 | `STATUTORY` | Statutory compliance (R4, R5 rule engine) |
+| 3 | `CONSISTENCY` | Cross-clause consistency (R6) |
+| 4 | `RISK_ASYMMETRY` | Risk asymmetry (R7) |
+| 5 | `CITATION_GATE` | Citation gate (R8): blocks unresolved citations |
+| 6 | `TRIAGE` | Risk triage (R9): routes to review depth |
+
 ## Usage
 
 ```python
 from app.schemas.finding import Finding, Layer, Severity
 
 f = Finding(
-    layer=Layer.LEGAL,               # or "LEGAL", or 3
+    layer=Layer.COMPLETENESS,        # or "COMPLETENESS", or 1
     severity=Severity.HIGH,          # or "high"
     clause_reference="Missing",
     description="No governing-law clause.",
@@ -56,7 +70,5 @@ assert check_table_matches(conn) == []
 
 ## Known gaps
 
-- **Migration 11 must be applied** before `to_insert_row` output can be inserted. Until then `check_table_matches` reports `citation` and `status` as missing.
 - **No `INFO` severity.** `findings_severity_check` only allows low/medium/high/critical.
-- **Layer mapping is unconfirmed.** STRUCTURAL=0, FUNCTIONAL=1, RISK=2, LEGAL=3 is a placeholder until the pipeline's layer numbering is agreed. The table allows 0–6; 4–6 have no names yet.
 - `app/findings/schemas.py` (`FindingIn`) still takes `layer` as a plain int and is what `create_findings` uses today.

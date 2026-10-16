@@ -16,7 +16,7 @@ def load_example() -> dict:
 
 def test_example_validates():
     f = Finding.model_validate(load_example())
-    assert f.layer is Layer.LEGAL
+    assert f.layer is Layer.COMPLETENESS
     assert f.severity is Severity.HIGH
     assert f.status is FindingStatus.PENDING
 
@@ -29,7 +29,15 @@ def test_json_round_trip():
 
 
 def test_layer_accepts_stored_integer():
-    assert Finding.model_validate({**load_example(), "layer": 3}).layer is Layer.LEGAL
+    assert Finding.model_validate({**load_example(), "layer": 2}).layer is Layer.STATUTORY
+
+
+def test_layer_numbers_fixed_by_srd():
+    # Stored in findings.layer and mirrored by the frontend's PIPELINE_LAYERS: never renumber.
+    assert {l.name: l.value for l in Layer} == {
+        "INTAKE": 0, "COMPLETENESS": 1, "STATUTORY": 2, "CONSISTENCY": 3,
+        "RISK_ASYMMETRY": 4, "CITATION_GATE": 5, "TRIAGE": 6,
+    }
 
 
 def test_insert_row_matches_table():
@@ -37,7 +45,7 @@ def test_insert_row_matches_table():
     doc, ver = uuid4(), uuid4()
     row = f.to_insert_row(doc, ver)
     assert tuple(row) == INSERT_COLUMNS
-    assert row["layer"] == 3 and row["severity"] == "high" and row["advocate_action"] is None
+    assert row["layer"] == 1 and row["severity"] == "high" and row["advocate_action"] is None
     assert row["citation"] == f.citation
     assert Finding.from_db_row(row) == f
 

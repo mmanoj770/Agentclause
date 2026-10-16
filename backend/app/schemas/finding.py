@@ -11,15 +11,17 @@ from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_valid
 
 
 class Layer(IntEnum):
-    """Review layer. Values are what the `findings.layer` smallint column stores (0-6).
+    """Layer in the review pipeline (matches SRD R2-R9 and frontend PIPELINE_LAYERS).
 
-    UNCONFIRMED: this name-to-number mapping is a placeholder until the pipeline's
-    layer numbering is agreed. Layers 4-6 have no names yet.
+    Values are what the `findings.layer` smallint column stores (0-6).
     """
-    STRUCTURAL = 0
-    FUNCTIONAL = 1
-    RISK = 2
-    LEGAL = 3
+    INTAKE = 0              # Intake and normalisation (R2)
+    COMPLETENESS = 1        # Completeness (R3)
+    STATUTORY = 2           # Statutory compliance (R4, R5 rule engine)
+    CONSISTENCY = 3         # Cross-clause consistency (R6)
+    RISK_ASYMMETRY = 4      # Risk asymmetry (R7)
+    CITATION_GATE = 5       # Citation gate (R8) — blocks unresolved citations
+    TRIAGE = 6              # Risk triage (R9) — routes to review depth
 
 
 class Severity(str, Enum):
@@ -64,7 +66,7 @@ class Finding(BaseModel):
         description="Unique ID of the finding. Stored as `findings.id`.",
     )
     layer: Layer = Field(
-        description="Review layer that produced the finding. Accepts the name (\"RISK\") or the "
+        description="Review layer that produced the finding. Accepts the name (\"STATUTORY\") or the "
                     "stored integer (2); serialises to the name in JSON.",
     )
     severity: Severity = Field(description="How serious the issue is: critical, high, medium or low.")

@@ -24,20 +24,22 @@ def load_clause(conn: Connection, data: dict) -> str:
                 "Only X4 import pipeline should load verified clauses."
             )
 
+    # clause_id is inserted explicitly so the ID returned below is the ID stored.
     conn.execute(
         """
         INSERT INTO clauses (
-            clause_type, contract_types, favoured_party,
+            clause_id, clause_type, contract_types, favoured_party,
             statute_refs, version, verification_status,
             content, title, notes, verified_by,
             verified_at
         ) VALUES (
-            %s, %s, %s, %s, %s, %s,
+            %s, %s, %s, %s, %s, %s, %s,
             %s, %s, %s, %s,
             CASE WHEN %s = 'verified' THEN now() ELSE NULL END
         )
         """,
         (
+            clause.clause_id,
             clause.clause_type,
             clause.contract_types,
             clause.favoured_party,

@@ -14,7 +14,14 @@ class Settings(BaseSettings):
     # Which contract types users may pick. Nothing is "live" yet, so include in_build while developing.
     selectable_contract_statuses: list[str] = ["live"]
 
-    # D3: Gemini API key for clause embeddings (text-embedding-004, 768 dims)
+    # Gemini (free tier) - used by the Drafting Agent.
+    # Model names are config so a retired model can be swapped via .env.local
+    # (GEMINI_EMBEDDING_MODEL=..., GEMINI_GENERATION_MODEL=...) without code changes.
+    # text-embedding-004 was shut down by Google on 2026-01-14.
+    # Changing the embedding model means re-embedding every clause (vectors from
+    # different models are not comparable): set embedding = null, then re-run embed_runner.
     gemini_api_key: str = ""
+    gemini_embedding_model: str = "gemini-embedding-001"
+    gemini_generation_model: str = "gemini-3.5-flash-lite"
 
 settings = Settings()

@@ -24,4 +24,23 @@ class Settings(BaseSettings):
     gemini_embedding_model: str = "gemini-embedding-001"
     gemini_generation_model: str = "gemini-3.5-flash-lite"
 
+    # File storage (S3). Credentials come from the standard AWS chain (env vars, profile,
+    # role); the three aws_* fields below exist only so they can be set in .env.local.
+    # India region for DPDP data residency.
+    aws_region: str = "ap-south-1"
+    s3_bucket: str = ""                       # empty = storage routes answer 503
+    s3_endpoint_url: str | None = None        # default: the regional AWS endpoint
+    aws_access_key_id: str | None = None
+    aws_secret_access_key: str | None = None
+    aws_session_token: str | None = None
+    upload_url_ttl_seconds: int = 300
+    download_url_ttl_seconds: int = 300
+    max_upload_bytes: int = 26_214_400        # 25 MB
+    allowed_upload_types: list[str] = [
+        "application/pdf",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "image/png",
+        "image/jpeg",
+    ]
+
 settings = Settings()

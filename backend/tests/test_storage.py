@@ -48,7 +48,8 @@ class FakeConn:
     """Answers just the queries the file routes and get_document make."""
 
     def __init__(self, assigned_lawyer=None):
-        self.doc = {"id": uuid.UUID(DOC), "org_id": ORG_A, "assigned_lawyer_id": assigned_lawyer}
+        self.doc = {"id": uuid.UUID(DOC), "org_id": ORG_A, "assigned_lawyer_id": assigned_lawyer,
+                    "state": "drafted"}
         self.versions = []  # {"version_no", "storage_key"}
         self.audit = []
         self.race_once = False  # another request takes the next number first
@@ -291,6 +292,32 @@ def test_download_missing_version_is_404(env):
 
 def test_download_version_zero_is_422(env):
     assert env.client.get(f"/documents/{DOC}/files/download-url?version_no=0").status_code == 422
+
+
+# --- document state -----------------------------------------------------------------------
+
+@pytest.mark.parametrize("state", ["drafted", "revision_in_progress", "lawyer_commented"])
+def test_upload_and_confirm_allowed_states(env, state):
+    env.conn.doc["state"] = state
+    assert upload(env).status_code == 200
+    key = own_key()
+    stub_head(env, key)
+    assert confirm(env, key).status_code == 200
+
+
+@pytest.mark.parametrize("state", ["under_ai_review", "pending_lawyer_review", "lawyer_approved",
+                                   "delivered", "negotiation_in_progress"])
+def test_upload_and_confirm_blocked_states_are_409(env, state):
+    env.conn.doc["state"] = state
+    assert upload(env).status_code == 409
+    assert confirm(env, own_key()).status_code == 409  # no S3 call stubbed, none made
+    assert env.conn.versions == []
+
+
+def test_download_is_not_state_gated(env):
+    seed(env, 1)
+    env.conn.doc["state"] = "delivered"
+    assert env.client.get(f"/documents/{DOC}/files/download-url").status_code == 200
 
 
 # --- access control -----------------------------------------------------------------------

@@ -10,6 +10,7 @@ from app.auth.dependencies import CurrentUser, get_current_user, require_role
 from app.config import settings
 from app.db import get_conn
 from app.documents.service import get_document
+from app.documents.states import DocState
 from app.storage import s3 as storage
 
 router = APIRouter(prefix="/documents/{doc_id}/files", tags=["files"])
@@ -21,6 +22,15 @@ MAX_VERSION_ATTEMPTS = 5
 # the contract. The frontend also uploads execution evidence (stamp-duty certificates), which
 # is not a draft and would wrongly bump the version number. Evidence needs its own table or a
 # `kind` on the upload; deliberately not solved here.
+
+
+# Files may only change while the startup can still edit the contract.
+UPLOAD_STATES = frozenset({DocState.DRAFTED, DocState.REVISION_IN_PROGRESS, DocState.LAWYER_COMMENTED})
+
+
+def _require_uploadable(doc: dict) -> None:
+    if doc["state"] not in UPLOAD_STATES:
+        raise HTTPException(409, f"Files cannot be uploaded while the document is '{doc['state']}'")
 
 
 class UploadRequest(BaseModel):
@@ -38,6 +48,7 @@ def upload_url(doc_id: UUID, body: UploadRequest,
                user: CurrentUser = Depends(startup_only), conn=Depends(get_conn),
                s3=Depends(storage.get_s3)):
     doc = get_document(conn, doc_id, user)  # 404 outside the caller's org
+    _require_uploadable(doc)
     if body.content_type not in settings.allowed_upload_types or body.content_type not in storage.EXTENSIONS:
         raise HTTPException(422, "Use a PDF, DOCX, PNG or JPEG file.")
     if not 0 < body.size <= settings.max_upload_bytes:
@@ -69,6 +80,7 @@ def confirm(doc_id: UUID, body: ConfirmRequest,
             user: CurrentUser = Depends(startup_only), conn=Depends(get_conn),
             s3=Depends(storage.get_s3)):
     doc = get_document(conn, doc_id, user)
+    _require_uploadable(doc)
     key = body.key
     prefix = storage.key_prefix(doc["org_id"], doc["id"])
     if not key.startswith(prefix) or len(key) == len(prefix) or ".." in key:

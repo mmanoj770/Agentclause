@@ -38,8 +38,19 @@ def test_insert_row_matches_table():
     row = f.to_insert_row(doc, ver)
     assert tuple(row) == INSERT_COLUMNS
     assert row["layer"] == 3 and row["severity"] == "high" and row["advocate_action"] is None
-    back = Finding.from_db_row(row, citation=f.citation)
-    assert back == f
+    assert row["citation"] == f.citation
+    assert Finding.from_db_row(row) == f
+
+
+@pytest.mark.parametrize("status, action", [
+    ("pending", None), ("confirmed", "confirm"), ("overridden", "override"), ("added", "add"),
+])
+def test_status_maps_to_advocate_action(status, action):
+    # Must agree with the generated findings.status column in migration 11.
+    f = Finding.model_validate({**load_example(), "status": status})
+    row = f.to_insert_row(uuid4(), uuid4())
+    assert row["advocate_action"] == action
+    assert Finding.from_db_row(row).status.value == status
 
 
 @pytest.mark.parametrize("change", [

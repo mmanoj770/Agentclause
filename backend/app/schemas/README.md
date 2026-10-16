@@ -13,8 +13,10 @@
 | `description` | non-empty string | `description` |
 | `rule_applied` | rule ID in `UPPER_SNAKE_CASE` | `rule_applied` |
 | `remedy_suggested` | non-empty string | `remedy_suggested` |
-| `citation` | non-empty string | **not stored** (no column yet) |
-| `status` | `FindingStatus`: `pending` (default), `confirmed`, `overridden`, `added` | `advocate_action` (`null`, `confirm`, `override`, `add`) |
+| `citation` | non-empty string | `citation` (migration 11) |
+| `status` | `FindingStatus`: `pending` (default), `confirmed`, `overridden`, `added` | written as `advocate_action` (`null`, `confirm`, `override`, `add`); read as the generated `status` column (migration 11) |
+
+`status` is a generated column, so the database computes it from `advocate_action` and it can't be written directly. The adjudicate and add-finding code keeps writing `advocate_action`, and `status` follows automatically.
 
 Unknown fields are rejected.
 
@@ -37,7 +39,7 @@ f.model_dump_json()                       # JSON for the API / frontend; layer i
 Finding.model_validate_json(raw)          # parse agent output
 
 row = f.to_insert_row(document_id, version_id)   # dict of findings columns, ready to insert
-Finding.from_db_row(row, citation=...)           # back from a table row
+Finding.from_db_row(row)                         # back from a table row
 ```
 
 To check that the model still matches the database:
@@ -54,7 +56,7 @@ assert check_table_matches(conn) == []
 
 ## Known gaps
 
-- **`citation` is not persisted.** The `findings` table has no `citation` column, so `to_insert_row` leaves it out. A migration adding `citation text` would close this.
+- **Migration 11 must be applied** before `to_insert_row` output can be inserted. Until then `check_table_matches` reports `citation` and `status` as missing.
 - **No `INFO` severity.** `findings_severity_check` only allows low/medium/high/critical.
-- **Layers 4–6.** The table allows layers 0–6; only 0–3 have names here.
+- **Layer mapping is unconfirmed.** STRUCTURAL=0, FUNCTIONAL=1, RISK=2, LEGAL=3 is a placeholder until the pipeline's layer numbering is agreed. The table allows 0–6; 4–6 have no names yet.
 - `app/findings/schemas.py` (`FindingIn`) still takes `layer` as a plain int and is what `create_findings` uses today.

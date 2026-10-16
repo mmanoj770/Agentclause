@@ -1,0 +1,103 @@
+from fastapi import HTTPException
+
+from app.audit import write_audit
+from app.auth.dependencies import CurrentUser
+from app.documents.service import get_document
+from app.findings.schemas import AdjudicateIn, FindingIn, LawyerFindingIn
+
+
+def create_findings(conn, document_id, version_id, items: list[FindingIn]) -> int:
+    """Called by the pipeline (not exposed as an API route)."""
+    with conn.transaction():
+        ok = conn.execute(
+            "select 1 from document_versions where id = %s and document_id = %s",
+            (version_id, document_id),
+        ).fetchone()
+        if ok is None:
+            raise ValueError("version does not belong to this document")
+        for f in items:
+            conn.execute(
+                """insert into findings (document_id, document_version_id, layer, severity,
+                       clause_reference, description, rule_applied, remedy_suggested)
+                   values (%s, %s, %s, %s, %s, %s, %s, %s)""",
+                (document_id, version_id, f.layer, f.severity, f.clause_reference,
+                 f.description, f.rule_applied, f.remedy_suggested),
+            )
+        write_audit(conn, document_id=document_id, actor_id=None, actor_role="system",
+                    action="findings_created",
+                    details={"count": len(items), "version_id": str(version_id)})
+    return len(items)
+
+
+def list_findings(conn, user: CurrentUser, doc_id, layer: int | None, severity: str | None):
+    get_document(conn, doc_id, user)  # 404 unless this lawyer is assigned to the document
+    return conn.execute(
+        """select f.*, v.version_no
+           from findings f
+           join document_versions v on v.id = f.document_version_id
+           where f.document_id = %s
+             and v.version_no = (select max(version_no) from document_versions where document_id = %s)
+             and (%s::smallint is null or f.layer = %s)
+             and (%s::text is null or f.severity = %s)
+           order by array_position(array['critical','high','medium','low'], f.severity),
+                    f.layer nulls last, f.created_at""",
+        (doc_id, doc_id, layer, layer, severity, severity),
+    ).fetchall()
+
+
+def adjudicate(conn, user: CurrentUser, finding_id, body: AdjudicateIn) -> dict:
+    with conn.transaction():
+        row = conn.execute(
+            """select f.*, d.state as doc_state, d.assigned_lawyer_id
+               from findings f join documents d on d.id = f.document_id
+               where f.id = %s for update of f, d""",
+            (finding_id,),
+        ).fetchone()
+        if row is None or str(row["assigned_lawyer_id"]) != user.id:
+            raise HTTPException(404, "Finding not found")
+        if row["doc_state"] != "pending_lawyer_review":
+            raise HTTPException(409, "Findings can only be adjudicated while the document is in review")
+        if body.action == "override" and not (body.notes and body.notes.strip()):
+            raise HTTPException(422, "An override needs a reason in notes")
+
+        updated = conn.execute(
+            """update findings set advocate_action = %s, advocate_notes = %s,
+                   adjudicated_by = %s, adjudicated_at = now()
+               where id = %s returning *""",
+            (body.action, body.notes, user.id, finding_id),
+        ).fetchone()
+        write_audit(conn, document_id=row["document_id"], actor_id=user.id, actor_role=user.role,
+                    action="finding_adjudicated",
+                    details={"finding_id": str(finding_id), "action": body.action,
+                             "before": row["advocate_action"], "notes": body.notes})
+    return updated
+
+
+def add_finding(conn, user: CurrentUser, doc_id, body: LawyerFindingIn) -> dict:
+    with conn.transaction():
+        doc = conn.execute(
+            "select * from documents where id = %s for update", (doc_id,)
+        ).fetchone()
+        if doc is None or str(doc["assigned_lawyer_id"]) != user.id:
+            raise HTTPException(404, "Document not found")
+        if doc["state"] != "pending_lawyer_review":
+            raise HTTPException(409, "Findings can only be added while the document is in review")
+        ver = conn.execute(
+            "select id from document_versions where document_id = %s order by version_no desc limit 1",
+            (doc_id,),
+        ).fetchone()
+        if ver is None:
+            raise HTTPException(409, "Document has no version yet")
+
+        created = conn.execute(
+            """insert into findings (document_id, document_version_id, layer, severity,
+                   clause_reference, description, rule_applied, remedy_suggested,
+                   advocate_action, advocate_notes, adjudicated_by, adjudicated_at)
+               values (%s, %s, null, %s, %s, %s, %s, %s, 'add', %s, %s, now())
+               returning *""",
+            (doc_id, ver["id"], body.severity, body.clause_reference, body.description,
+             body.rule_applied, body.remedy_suggested, body.notes, user.id),
+        ).fetchone()
+        write_audit(conn, document_id=doc_id, actor_id=user.id, actor_role=user.role,
+                    action="finding_added", details={"finding_id": str(created["id"])})
+    return created

@@ -30,3 +30,5 @@ from app.documents.router import router as documents_router
 app.include_router(documents_router)
 from app.lawyer_queue.router import router as queue_router
 app.include_router(queue_router)
+from app.findings.router import router as findings_router
+app.include_router(findings_router)

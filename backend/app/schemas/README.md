@@ -13,8 +13,8 @@
 | `description` | non-empty string | `description` |
 | `rule_applied` | rule ID in `UPPER_SNAKE_CASE` | `rule_applied` |
 | `remedy_suggested` | non-empty string | `remedy_suggested` |
-| `citation` | non-empty string | `citation` (migration 11) |
-| `status` | `FindingStatus`: `pending` (default), `confirmed`, `overridden`, `added` | written as `advocate_action` (`null`, `confirm`, `override`, `add`); read as the generated `status` column (migration 11) |
+| `citation` | non-empty string | `citation` (the finding_citation_and_status migration) |
+| `status` | `FindingStatus`: `pending` (default), `confirmed`, `overridden`, `added` | written as `advocate_action` (`null`, `confirm`, `override`, `add`); read as the generated `status` column (the finding_citation_and_status migration) |
 
 `status` is a generated column, so the database computes it from `advocate_action` and it can't be written directly. The adjudicate and add-finding code keeps writing `advocate_action`, and `status` follows automatically.
 

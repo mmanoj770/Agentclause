@@ -5,3 +5,5 @@ psycopg[binary,pool]
 pyjwt[crypto]
 httpx
 pytest
+python-docx
+pypdf

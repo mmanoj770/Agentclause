@@ -5,7 +5,10 @@
 -- Rules checked
 --   anon           : no privilege of any kind on any public table or sequence
 --   authenticated  : SELECT only, and only on tables with a SELECT policy for authenticated;
---                    nothing else on any public table, and no sequence privileges
+--                    nothing else on any public table, and no sequence privileges.
+--                    `clauses` is deliberately closed to anon and authenticated (the frontend only
+--                    uses Supabase for auth; clauses are read by the backend), so for it "no
+--                    privileges" is the expected state even though it has a SELECT policy.
 --   audit_logs     : nobody (public, anon, authenticated, service_role) has UPDATE, DELETE or TRUNCATE
 --   functions      : anon cannot run auth_user_role()/auth_org_id(); authenticated can;
 --                    custom_access_token_hook is closed to anon/authenticated and open to supabase_auth_admin
@@ -33,6 +36,7 @@ with t as (
   from (select t.oid, t.relname,
                exists (select 1 from pg_policies pp
                        where pp.schemaname = 'public' and pp.tablename = t.relname
+                         and t.relname <> 'clauses'
                          and pp.cmd in ('SELECT', 'ALL')
                          and 'authenticated' = any (pp.roles)) as served
         from t) s

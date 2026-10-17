@@ -1,6 +1,6 @@
 """End-to-end test of the S3 file routes against the REAL Supabase project and REAL S3 bucket.
 
-    cd backend && python ../scripts/e2e_upload.py [--check-expiry] [--base-url http://127.0.0.1:8000]
+    cd backend && python ../scripts/e2e_upload.py [--check-expiry] [--with-review] [--base-url http://127.0.0.1:8000]
 
 Signs in as a real user, then drives the API: create a document, get an upload URL, upload a
 PDF straight to S3, confirm it, read it back through a download URL, and check tenant
@@ -15,7 +15,8 @@ SUPABASE_URL, SUPABASE_ANON_KEY, TEST_USER_EMAIL, TEST_USER_PASSWORD, TEST_USER_
 TEST_USER_B_PASSWORD, plus the S3 and
 DATABASE_URL settings. Uses only httpx, which the repo already depends on.
 
-Step 9 runs the X1 stub review, chat and draft routes on user A's step-3 document (real state machine); it moves that document to pending_lawyer_review.
+Step 9 runs only with --with-review: it calls the X1 stub review, chat and draft routes on user A's
+step-3 document against the real state machine, which moves that document to pending_lawyer_review.
 Prints PASS/FAIL per step. Never prints tokens, passwords, keys or presigned URLs (only the
 host and first path segment). Deletes NOTHING: the test document, its version row and the S3
 object stay, and their ids/key are printed at the end so the object can be removed later with
@@ -337,7 +338,7 @@ def agent_stub_check(client, auth_a: dict, doc_id: str, ctx: dict) -> None:
            not [a for a in audit_rows(doc_id)[n:] if a["action"] == "draft_generated"])
 
 
-def run(client, token: str, ctx: dict, check_expiry: bool) -> None:
+def run(client, token: str, ctx: dict, check_expiry: bool, with_review: bool) -> None:
     from app.db import pool
 
     auth = {"Authorization": f"Bearer {token}"}
@@ -436,12 +437,17 @@ def run(client, token: str, ctx: dict, check_expiry: bool) -> None:
             report("8", "expired link -> 403", False, type(exc).__name__)
 
     # 9. the stub agents, last: the review moves user A's step-3 document out of 'drafted'
-    agent_stub_check(client, auth, doc_id, ctx)
+    if with_review:
+        agent_stub_check(client, auth, doc_id, ctx)
+    else:
+        skip("9", "review/chat/draft", "pass --with-review")
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--check-expiry", action="store_true")
+    ap.add_argument("--with-review", action="store_true",
+                    help="also run step 9: stub review/chat/draft on user A's document (changes its state)")
     ap.add_argument("--base-url", help="use a running server instead of running the app in-process")
     args = ap.parse_args()
 
@@ -456,14 +462,14 @@ def main() -> int:
             pool.open()  # the DB checks run here, not in the server
             try:
                 with httpx.Client(base_url=args.base_url, timeout=60) as client:
-                    run(client, token, ctx, args.check_expiry)
+                    run(client, token, ctx, args.check_expiry, args.with_review)
             finally:
                 pool.close()
         else:
             from fastapi.testclient import TestClient
             from app.main import app
             with TestClient(app) as client:  # entering the context runs the lifespan (opens the DB pool)
-                run(client, token, ctx, args.check_expiry)
+                run(client, token, ctx, args.check_expiry, args.with_review)
     except Exception as exc:
         msg = str(exc).splitlines()[0][:200] if str(exc) else ""
         report("-", "unexpected error", False, f"{type(exc).__name__}: {msg}")

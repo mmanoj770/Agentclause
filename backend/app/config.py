@@ -9,7 +9,13 @@ class Settings(BaseSettings):
     database_url: str = "postgresql://postgres:postgres@127.0.0.1:54322/postgres"
     supabase_url: str = "http://127.0.0.1:54321"
     supabase_jwt_secret: str | None = None  # only needed for HS256 tokens
-    frontend_origin: str = "http://localhost:3000"
+    # Comma-separated browser origins allowed by CORS (no "*"). Kept as a str because
+    # pydantic-settings would parse a list[str] env var as JSON.
+    cors_allowed_origins: str = "http://localhost:3000"
+
+    @property
+    def cors_origins(self) -> list[str]:
+        return [o.strip() for o in self.cors_allowed_origins.split(",") if o.strip()]
 
     # Which contract types users may pick. Nothing is "live" yet, so include in_build while developing.
     selectable_contract_statuses: list[str] = ["live"]

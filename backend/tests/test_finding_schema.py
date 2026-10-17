@@ -54,7 +54,7 @@ def test_insert_row_matches_table():
     ("pending", None), ("confirmed", "confirm"), ("overridden", "override"), ("added", "add"),
 ])
 def test_status_maps_to_advocate_action(status, action):
-    # Must agree with the generated findings.status column in migration 11.
+    # Must agree with the generated findings.status column in the finding_citation_and_status migration.
     f = Finding.model_validate({**load_example(), "status": status})
     row = f.to_insert_row(uuid4(), uuid4())
     assert row["advocate_action"] == action

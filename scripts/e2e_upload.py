@@ -15,6 +15,7 @@ SUPABASE_URL, SUPABASE_ANON_KEY, TEST_USER_EMAIL, TEST_USER_PASSWORD, TEST_USER_
 TEST_USER_B_PASSWORD, plus the S3 and
 DATABASE_URL settings. Uses only httpx, which the repo already depends on.
 
+Step 9 runs the X1 stub review, chat and draft routes on user A's step-3 document (real state machine); it moves that document to pending_lawyer_review.
 Prints PASS/FAIL per step. Never prints tokens, passwords, keys or presigned URLs (only the
 host and first path segment). Deletes NOTHING: the test document, its version row and the S3
 object stay, and their ids/key are printed at the end so the object can be removed later with
@@ -228,7 +229,7 @@ def isolation_check(client, auth_a: dict, org_a: str, doc_a: str, key_a: str, ct
     if not report("7", "user B is in a different org than user A", bool(org_b) and org_b != org_a,
                   f"B org_id: {org_b}"):
         return
-    auth_b = {"Authorization": f"Bearer {token_b}"}
+    auth_b = ctx["auth_b"] = {"Authorization": f"Bearer {token_b}"}
     made = upload_new_document(client, auth_b, "7", "B")
     if made is None:
         return
@@ -239,6 +240,101 @@ def isolation_check(client, auth_a: dict, org_a: str, doc_a: str, key_a: str, ct
         return
     probe_foreign_document(client, auth_a, doc_b, key_b, "A", "B")
     probe_foreign_document(client, auth_b, doc_a, key_a, "B", "A")
+
+
+def db_rows(sql: str, params: tuple) -> list[dict]:
+    """Rows from a read-only query over a read-only connection."""
+    from app.db import pool
+
+    conn = pool.getconn()
+    try:
+        conn.read_only = True
+        rows = conn.execute(sql, params).fetchall()
+        conn.rollback()
+        return rows
+    finally:
+        conn.read_only = False
+        pool.putconn(conn)
+
+
+def audit_rows(doc_id: str) -> list[dict]:
+    return db_rows("select id, actor_id, actor_role, action, details from audit_logs "
+                   "where document_id = %s order by id", (doc_id,))
+
+
+def agent_stub_check(client, auth_a: dict, doc_id: str, ctx: dict) -> None:
+    """Step 9: the X1 stub agents on user A's step-3 document, with the REAL state machine."""
+    def finding_count() -> int:
+        return db_rows("select count(*) as n from findings where document_id = %s", (doc_id,))[0]["n"]
+
+    version = db_rows("select id, version_no from document_versions where document_id = %s "
+                      "order by version_no desc limit 1", (doc_id,))
+    if not report("9", "document has a version to review", len(version) == 1):
+        return
+    version = version[0]
+    audits_before = len(audit_rows(doc_id))
+
+    r = client.post(f"/documents/{doc_id}/review", headers=auth_a)
+    body = r.json() if r.status_code == 200 else {}
+    created = body.get("findings_created") or 0
+    if not report("9", "review -> 200, pending_lawyer_review, findings_created > 0",
+                  r.status_code == 200 and body.get("state") == "pending_lawyer_review" and created > 0,
+                  api_detail(r) if r.status_code != 200 else f"findings_created {created}"):
+        return  # a rejection is reported as is; nothing is worked around
+
+    rows = db_rows("select document_id, document_version_id from findings where document_id = %s", (doc_id,))
+    report("9", "findings rows: count matches, right document and version",
+           len(rows) == created and all(str(f["document_id"]) == doc_id and
+                                        f["document_version_id"] == version["id"] for f in rows),
+           f"{len(rows)} row(s)")
+    new = audit_rows(doc_id)[audits_before:]
+    found = [a for a in new if a["action"] == "findings_created"]
+    moves = [a for a in new if a["action"] == "state_change"]
+    sys_rows = all(a["actor_id"] is None and a["actor_role"] == "system" for a in found + moves)
+    report("9", "audit: one findings_created + two state_change, all actor_id NULL / role 'system'",
+           len(found) == 1 and len(moves) == 2 and sys_rows,
+           "new actions: " + ", ".join(a["action"] for a in new))
+    report("9", "audit: findings_created count matches",
+           len(found) == 1 and found[0]["details"].get("count") == created)
+    report("9", "audit: state changes are drafted->under_ai_review->pending_lawyer_review",
+           [(m["details"].get("from"), m["details"].get("to")) for m in moves] ==
+           [("drafted", "under_ai_review"), ("under_ai_review", "pending_lawyer_review")],
+           str([(m["details"].get("from"), m["details"].get("to")) for m in moves]))
+    state = db_rows("select state from documents where id = %s", (doc_id,))[0]["state"]
+    report("9", "final state is pending_lawyer_review", state == "pending_lawyer_review", f"state {state}")
+
+    before = finding_count()
+    r = client.post(f"/documents/{doc_id}/review", headers=auth_a)
+    report("9", "second review -> 409", r.status_code == 409, api_detail(r))
+    report("9", "second review added no findings", finding_count() == before)
+
+    auth_b = ctx.get("auth_b")
+    if auth_b is None:
+        skip("9", "user B review on A's document -> 404", "user B was not signed in at step 7")
+    else:
+        r = client.post(f"/documents/{doc_id}/review", headers=auth_b)
+        report("9", "user B review on A's document -> 404", r.status_code == 404, api_detail(r))
+        report("9", "user B's attempt added no findings", finding_count() == before)
+
+    question = "How long does the agreement last?"
+    n = len(audit_rows(doc_id))
+    r = client.post(f"/documents/{doc_id}/chat", headers=auth_a, json={"question": question})
+    report("9", "chat -> 200 with a status", r.status_code == 200 and r.json().get("status") in
+           ("answered", "refused", "escalated"), api_detail(r) if r.status_code != 200 else r.json()["status"])
+    chat = [a for a in audit_rows(doc_id)[n:] if a["action"] == "chat_turn"]
+    d = chat[0]["details"] if chat else {}
+    report("9", "chat audit row: question_length and status, no raw question",
+           len(chat) == 1 and d.get("question_length") == len(question) and d.get("status") and
+           "question" not in d and question not in str(d), f"details keys: {sorted(d)}")
+
+    n = len(audit_rows(doc_id))
+    r = client.post(f"/documents/{doc_id}/draft", headers=auth_a, json={
+        "disclosing_party": "E2E Test Co", "receiving_party": "E2E Other Co",
+        "effective_date": "2026-11-01", "term_months": 12})
+    report("9", "draft after review -> 409 (state moved to pending_lawyer_review)",
+           r.status_code == 409, api_detail(r))
+    report("9", "draft 409 wrote no draft_generated audit row",
+           not [a for a in audit_rows(doc_id)[n:] if a["action"] == "draft_generated"])
 
 
 def run(client, token: str, ctx: dict, check_expiry: bool) -> None:
@@ -338,6 +434,9 @@ def run(client, token: str, ctx: dict, check_expiry: bool) -> None:
             report("8", "expired link -> 403", late.status_code == 403, f"HTTP {late.status_code}")
         except httpx.HTTPError as exc:
             report("8", "expired link -> 403", False, type(exc).__name__)
+
+    # 9. the stub agents, last: the review moves user A's step-3 document out of 'drafted'
+    agent_stub_check(client, auth, doc_id, ctx)
 
 
 def main() -> int:

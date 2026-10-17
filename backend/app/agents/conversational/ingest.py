@@ -12,6 +12,7 @@ CLAUSE_RE = re.compile(
     re.IGNORECASE,
 )
 MAX_HEADING_LEN = 60
+PAGE_NUMBER_RE = re.compile(r"^\d{1,3}$")
 
 
 class ClauseChunk(BaseModel):
@@ -50,24 +51,35 @@ def split_into_clauses(text: str) -> list[dict]:
 
     for raw in text.splitlines():
         line = raw.strip()
-        if not line:
+        if not line or PAGE_NUMBER_RE.match(line):
             continue
         match = CLAUSE_RE.match(line)
         if not match:
             current["lines"].append(line)
             continue
 
-        sections.append(current)
         number = match.group(1).rstrip(".)")
         rest = match.group(2).strip()
-        top = number.split(".")[0]
+        parts = number.split(".")
 
-        if _looks_like_heading(rest):
-            heading, body = rest, []
-            if "." not in number:
-                top_headings[top] = heading
+        same_parent = (
+            len(parts) > 2
+            and current["clause_number"]
+            and current["clause_number"].split(".")[:2] == parts[:2]
+        )
+        if same_parent:
+            current["lines"].append(f"{number} {rest}")
+            continue
+
+        sections.append(current)
+        top = parts[0]
+        if len(parts) == 1 and _looks_like_heading(rest):
+            heading = rest.rstrip(":").strip()
+            top_headings[top] = heading
+            body = []
         else:
-            heading, body = top_headings.get(top), [rest]
+            heading = top_headings.get(top)
+            body = [rest]
         current = {"clause_number": number, "heading": heading, "lines": body}
 
     sections.append(current)

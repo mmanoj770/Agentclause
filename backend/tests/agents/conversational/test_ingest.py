@@ -74,3 +74,25 @@ def test_unsupported_type_rejected():
 def test_empty_document_rejected():
     with pytest.raises(ValueError):
         ingest_contract(DOC, "empty.txt", b"   ")
+
+NESTED = """1. Definitions
+1.3 Confidential Information means any information, in whatever form.
+1.3.1 Such information includes the following:
+1.3.1.1 information disclosed in writing
+1.3.1.2 information disclosed orally
+2. Term
+2.1 This Agreement remains in force for five years.
+"""
+
+
+def test_deep_subclauses_merge_into_parent():
+    chunks = ingest_contract(DOC, "n.txt", NESTED.encode())
+    assert [c.clause_number for c in chunks] == ["1.3", "2.1"]
+    assert "1.3.1.2 information disclosed orally" in chunks[0].text
+    assert chunks[0].heading == "Definitions"
+
+
+def test_page_numbers_dropped():
+    text = "24\nPreamble text here.\n\n1. Term\n1.1 This Agreement lasts five years.\n"
+    chunks = ingest_contract(DOC, "p.txt", text.encode())
+    assert "24" not in chunks[0].text

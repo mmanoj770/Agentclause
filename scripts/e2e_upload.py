@@ -3,13 +3,16 @@
     cd backend && python ../scripts/e2e_upload.py [--check-expiry] [--base-url http://127.0.0.1:8000]
 
 Signs in as a real user, then drives the API: create a document, get an upload URL, upload a
-PDF straight to S3, confirm it, read it back through a download URL, and check that another
-org's document is not reachable. The API runs in-process (TestClient as a context manager, so
+PDF straight to S3, confirm it, read it back through a download URL, and check tenant
+isolation both ways: user B (TEST_USER_B_EMAIL / TEST_USER_B_PASSWORD, a different org) gets
+its own document with version 1, and neither user can upload to, confirm on or download from
+the other's document. The API runs in-process (TestClient as a context manager, so
 the app's lifespan opens the DB pool) unless --base-url points at a running server; the
 read-only DB checks need DATABASE_URL either way.
 
 Config comes from .env.local at the repo root (the same file app.config reads):
-SUPABASE_URL, SUPABASE_ANON_KEY, TEST_USER_EMAIL, TEST_USER_PASSWORD, plus the S3 and
+SUPABASE_URL, SUPABASE_ANON_KEY, TEST_USER_EMAIL, TEST_USER_PASSWORD, TEST_USER_B_EMAIL,
+TEST_USER_B_PASSWORD, plus the S3 and
 DATABASE_URL settings. Uses only httpx, which the repo already depends on.
 
 Prints PASS/FAIL per step. Never prints tokens, passwords, keys or presigned URLs (only the
@@ -46,6 +49,8 @@ class E2EEnv(BaseSettings):
     supabase_anon_key: str = ""
     test_user_email: str = ""
     test_user_password: str = ""
+    test_user_b_email: str = ""
+    test_user_b_password: str = ""
 
 
 env = E2EEnv()
@@ -95,6 +100,25 @@ def unverified_claims(token: str) -> dict:
     return json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
 
 
+def password_grant(step: str, name: str, email: str, password: str) -> str | None:
+    """Sign in with email/password; returns the access token, or None after reporting a FAIL."""
+    try:
+        r = httpx.post(f"{settings.supabase_url}/auth/v1/token", params={"grant_type": "password"},
+                       headers={"apikey": env.supabase_anon_key},
+                       json={"email": email, "password": password}, timeout=30)
+    except httpx.HTTPError as exc:
+        report(step, name, False, type(exc).__name__)
+        return None
+    if r.status_code != 200:
+        try:
+            body = r.json()
+        except ValueError:
+            body = {}
+        report(step, name, False, f"HTTP {r.status_code} {body.get('error_code') or body.get('msg') or ''}".strip())
+        return None
+    return r.json()["access_token"]
+
+
 def sign_in() -> str | None:
     required = (("SUPABASE_URL", settings.supabase_url), ("SUPABASE_ANON_KEY", env.supabase_anon_key),
                 ("TEST_USER_EMAIL", env.test_user_email), ("TEST_USER_PASSWORD", env.test_user_password))
@@ -102,21 +126,9 @@ def sign_in() -> str | None:
     if not report("1", "test config present", not missing,
                   "missing in .env.local: " + ", ".join(missing) if missing else ""):
         return None
-    try:
-        r = httpx.post(f"{settings.supabase_url}/auth/v1/token", params={"grant_type": "password"},
-                       headers={"apikey": env.supabase_anon_key},
-                       json={"email": env.test_user_email, "password": env.test_user_password}, timeout=30)
-    except httpx.HTTPError as exc:
-        report("1", "sign in", False, type(exc).__name__)
+    token = password_grant("1", "sign in", env.test_user_email, env.test_user_password)
+    if token is None:
         return None
-    if r.status_code != 200:
-        try:
-            body = r.json()
-        except ValueError:
-            body = {}
-        report("1", "sign in", False, f"HTTP {r.status_code} {body.get('error_code') or body.get('msg') or ''}".strip())
-        return None
-    token = r.json()["access_token"]
     report("1", "sign in", True)
     claims = unverified_claims(token)
     role, org = claims.get("user_role"), claims.get("org_id")
@@ -128,6 +140,105 @@ def sign_in() -> str | None:
         return None
     report("1", "token has user_role and org_id", True)
     return token
+
+
+def version_numbers(doc_id: str) -> list[int]:
+    """The document's version numbers, read over a read-only connection."""
+    from app.db import pool
+
+    conn = pool.getconn()
+    try:
+        conn.read_only = True
+        rows = conn.execute("select version_no from document_versions where document_id = %s order by version_no",
+                            (doc_id,)).fetchall()
+        conn.rollback()
+        return [row["version_no"] for row in rows]
+    finally:
+        conn.read_only = False
+        pool.putconn(conn)
+
+
+def upload_new_document(client, auth: dict, step: str, who: str) -> tuple[str, str] | None:
+    """Create an nda document and upload one PDF so it has version 1. Returns (document id, S3 key)."""
+    r = client.post("/documents", json={"doc_type": DOC_TYPE}, headers=auth)
+    if not report(step, f"{who} creates an '{DOC_TYPE}' document", r.status_code == 201, api_detail(r)):
+        return None
+    doc_id = r.json()["id"]
+    data = sample_pdf()
+    r = client.post(f"/documents/{doc_id}/files/upload-url", headers=auth,
+                    json={"filename": FILENAME, "content_type": PDF, "size": len(data)})
+    if not report(step, f"{who} requests an upload URL", r.status_code == 200, api_detail(r)):
+        return None
+    post = r.json()
+    key = post["key"]
+    try:
+        up = httpx.post(post["url"], data=post["fields"], files={"file": (FILENAME, data, PDF)}, timeout=60)
+    except httpx.HTTPError as exc:
+        report(step, f"{who} uploads to S3", False, type(exc).__name__)
+        return doc_id, key
+    if not report(step, f"{who} uploads to S3", up.status_code in (200, 201, 204), f"HTTP {up.status_code}"):
+        return doc_id, key
+    r = client.post(f"/documents/{doc_id}/files/confirm", headers=auth, json={"key": key})
+    version_no = r.json().get("version_no") if r.status_code == 200 else None
+    report(step, f"{who}'s document has version 1", version_no == 1,
+           f"version_no {version_no}" if r.status_code == 200 else api_detail(r))
+    return doc_id, key
+
+
+def refused(r: httpx.Response) -> bool:
+    """403/404 and no link, upload form or version in the body."""
+    try:
+        body = r.json()
+    except ValueError:
+        body = {}
+    leaked = isinstance(body, dict) and any(k in body for k in ("url", "fields", "key", "version_no"))
+    return r.status_code in (403, 404) and not leaked
+
+
+def probe_foreign_document(client, auth: dict, doc_id: str, key: str, who: str, owner: str) -> None:
+    """`who` tries upload-url, confirm and download-url on a document owned by `owner`."""
+    data = sample_pdf()
+    before = version_numbers(doc_id)
+    attempts = (
+        ("upload-url", client.post(f"/documents/{doc_id}/files/upload-url", headers=auth,
+                                   json={"filename": FILENAME, "content_type": PDF, "size": len(data)})),
+        ("confirm", client.post(f"/documents/{doc_id}/files/confirm", headers=auth, json={"key": key})),
+        ("download-url", client.get(f"/documents/{doc_id}/files/download-url", headers=auth,
+                                    params={"version_no": 1})),
+    )
+    for route, r in attempts:
+        report("7", f"{who} -> {owner}'s document {route}: 403/404, nothing returned", refused(r),
+               f"HTTP {r.status_code}")
+    after = version_numbers(doc_id)
+    report("7", f"{owner}'s document still has only its original version(s)", after == before,
+           f"before {before}, after {after}")
+
+
+def isolation_check(client, auth_a: dict, org_a: str, doc_a: str, key_a: str, ctx: dict) -> None:
+    missing = [n for n, v in (("TEST_USER_B_EMAIL", env.test_user_b_email),
+                              ("TEST_USER_B_PASSWORD", env.test_user_b_password)) if not v]
+    if missing:
+        skip("7", "cross-org isolation", "missing in .env.local: " + ", ".join(missing))
+        return
+    token_b = password_grant("7", "sign in as user B", env.test_user_b_email, env.test_user_b_password)
+    if token_b is None:
+        return
+    claims_b = unverified_claims(token_b)
+    org_b = claims_b.get("org_id")
+    if not report("7", "user B is in a different org than user A", bool(org_b) and org_b != org_a,
+                  f"B org_id: {org_b}"):
+        return
+    auth_b = {"Authorization": f"Bearer {token_b}"}
+    made = upload_new_document(client, auth_b, "7", "B")
+    if made is None:
+        return
+    doc_b, key_b = made
+    ctx.setdefault("extra", []).append((doc_b, key_b))
+    if version_numbers(doc_b) != [1]:
+        report("7", "B's document has exactly version 1 in the DB", False, f"versions {version_numbers(doc_b)}")
+        return
+    probe_foreign_document(client, auth_a, doc_b, key_b, "A", "B")
+    probe_foreign_document(client, auth_b, doc_a, key_a, "B", "A")
 
 
 def run(client, token: str, ctx: dict, check_expiry: bool) -> None:
@@ -176,7 +287,6 @@ def run(client, token: str, ctx: dict, check_expiry: bool) -> None:
                   f"version_no {version_no}" if r.status_code == 200 else api_detail(r)):
         return
     conn = pool.getconn()
-    other = None
     try:
         conn.read_only = True  # the server rejects any write on this connection
         doc = conn.execute("select org_id, doc_type, state from documents where id = %s", (doc_id,)).fetchone()
@@ -193,8 +303,6 @@ def run(client, token: str, ctx: dict, check_expiry: bool) -> None:
         report("5", "audit log row for file_uploaded",
                len(uploaded) == 1 and uploaded[0]["details"].get("storage_key") == key,
                "actions: " + ", ".join(a["action"] for a in audits))
-        # Step 7 needs a foreign document; look it up while the read-only connection is open.
-        other = conn.execute("select id from documents where org_id <> %s limit 1", (org_id,)).fetchone()
         conn.rollback()
     finally:
         conn.read_only = False
@@ -213,14 +321,8 @@ def run(client, token: str, ctx: dict, check_expiry: bool) -> None:
         except httpx.HTTPError as exc:
             report("6", "download succeeds", False, type(exc).__name__)
 
-    # 7. tenant isolation
-    if other is None:
-        skip("7", "other org's document is not reachable", "no document from another org in the DB")
-    else:
-        r = client.get(f"/documents/{other['id']}/files/download-url", headers=auth)
-        leaked = r.status_code == 200 and "url" in r.json()
-        report("7", "other org's document -> 403/404, no link",
-               r.status_code in (403, 404) and not leaked, f"HTTP {r.status_code}")
+    # 7. tenant isolation, both directions, with a real document owned by user B (another org)
+    isolation_check(client, auth, org_id, doc_id, key, ctx)
 
     # 8. expiry
     if not check_expiry:
@@ -275,6 +377,9 @@ def main() -> int:
         print(f"  document id: {ctx.get('document_id')}")
         print(f"  S3 bucket:   {settings.s3_bucket}")
         print(f"  S3 key:      {ctx.get('s3_key')}   (remove it with the admin profile)")
+        for extra_doc, extra_key in ctx.get("extra", []):
+            print(f"  user B's document id: {extra_doc}")
+            print(f"  user B's S3 key:      {extra_key}   (remove it with the admin profile)")
     print("ALL PASS" if failures == 0 else f"{failures} step(s) FAILED")
     return 1 if failures else 0
 

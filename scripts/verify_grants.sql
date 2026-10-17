@@ -14,6 +14,11 @@
 --                    custom_access_token_hook is closed to anon/authenticated and open to supabase_auth_admin
 --   default privs  : postgres's defaults in public grant nothing to anon or authenticated
 --   service_role   : still has SELECT and INSERT on audit_logs (it must keep writing the log)
+--   columns        : anon and authenticated have no INSERT or UPDATE privilege on ANY column of any
+--                    public table (has_column_privilege also counts table-level grants), in particular
+--                    not on profiles.role or profiles.org_id
+--   policies       : no non-SELECT RLS policy (INSERT/UPDATE/DELETE/ALL) applies to anon, authenticated
+--                    or public on any public table, profiles above all
 
 with t as (
   select c.oid, c.relname
@@ -101,6 +106,57 @@ with t as (
              and a.grantee = (select oid from pg_roles where rolname = r))
   from (values ('r'), ('S'), ('f')) as o(ot)
   cross join (values ('anon'), ('authenticated')) as roles(r)
+
+  union all
+  -- profiles: nobody on the client side may write it (role and org_id decide who is a lawyer and
+  -- which client a user belongs to, so a self-service write would be privilege escalation)
+  select format('%s has no %s on profiles', r, p),
+         not has_table_privilege(r, 'public.profiles'::regclass, p)
+  from (values ('anon'), ('authenticated')) as roles(r)
+  cross join (values ('INSERT'), ('UPDATE'), ('DELETE'), ('TRUNCATE')) as pp(p)
+
+  union all
+  -- column level, every public table: no INSERT or UPDATE privilege on any column
+  select format('%s has no column-level %s on any column of %s', r, p, t.relname),
+         not exists (
+           select 1 from pg_attribute a
+           where a.attrelid = t.oid and a.attnum > 0 and not a.attisdropped
+             and has_column_privilege(r, t.oid, a.attnum, p))
+  from t
+  cross join (values ('anon'), ('authenticated')) as roles(r)
+  cross join (values ('INSERT'), ('UPDATE')) as cp(p)
+
+  union all
+  -- the two profiles columns that matter most, named explicitly
+  select format('%s cannot %s profiles.%s', r, p, col),
+         not has_column_privilege(r, 'public.profiles'::regclass, col, p)
+  from (values ('anon'), ('authenticated')) as roles(r)
+  cross join (values ('INSERT'), ('UPDATE')) as cp(p)
+  cross join (values ('role'), ('org_id')) as cc(col)
+
+  union all
+  -- column grants recorded in information_schema (a second view of the same facts)
+  select format('information_schema.column_privileges: %s has no %s column grants in public', r, p),
+         not exists (
+           select 1 from information_schema.column_privileges cpv
+           where cpv.table_schema = 'public' and cpv.grantee = r and cpv.privilege_type = p)
+  from (values ('anon'), ('authenticated')) as roles(r)
+  cross join (values ('INSERT'), ('UPDATE')) as cp(p)
+
+  union all
+  -- RLS: no write-side policy for the client roles, on any public table
+  select format('no non-SELECT policy applies to anon/authenticated/public on %s', t.relname),
+         not exists (
+           select 1 from pg_policies pp
+           where pp.schemaname = 'public' and pp.tablename = t.relname and pp.cmd <> 'SELECT'
+             and pp.roles && array['anon', 'authenticated', 'public']::name[])
+  from t
+  union all
+  select 'profiles has no non-SELECT policy for anon/authenticated/public (explicit)',
+         not exists (
+           select 1 from pg_policies pp
+           where pp.schemaname = 'public' and pp.tablename = 'profiles' and pp.cmd <> 'SELECT'
+             and pp.roles && array['anon', 'authenticated', 'public']::name[])
 )
 select case when ok then 'PASS' else 'FAIL' end as result, expectation
 from checks

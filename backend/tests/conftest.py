@@ -18,6 +18,41 @@ def login(email, password):
     r.raise_for_status()
     return {"Authorization": f"Bearer {r.json()['access_token']}"}
 
+# Role-separation tests log in to the live project. Without the TEST_* variables they are skipped, so a
+# plain `pytest` run is clean. A skip is not a pass: REQUIRE_ACCESS_TESTS=1 turns the skip into a failure,
+# and the summary always prints how many tests were skipped this way.
+ACCESS_SKIP_TAG = "[access-tests]"
+
+
+def _access_creds(*names):
+    needed = ("SUPABASE_URL", "SUPABASE_ANON_KEY", *names)
+    missing = [n for n in needed if not os.environ.get(n)]
+    if not missing:
+        return tuple(os.environ[n] for n in names)
+    msg = f"{ACCESS_SKIP_TAG} not set: {', '.join(missing)}"
+    if os.environ.get("REQUIRE_ACCESS_TESTS") == "1":
+        pytest.fail(f"{msg} (REQUIRE_ACCESS_TESTS=1, so this is a failure, not a skip)", pytrace=False)
+    pytest.skip(msg)
+
+
+_access_skips = []
+
+
+def pytest_runtest_logreport(report):
+    if report.skipped and ACCESS_SKIP_TAG in str(report.longrepr):
+        _access_skips.append(report.nodeid)
+
+
+def pytest_terminal_summary(terminalreporter):
+    if _access_skips:
+        terminalreporter.section("access tests")
+        terminalreporter.write_line(
+            f"ACCESS TESTS SKIPPED: {len(_access_skips)} (TEST_* variables missing). "
+            "These are the role-separation tests; a skip is not a pass. "
+            "Set the variables, or run with REQUIRE_ACCESS_TESTS=1 to make this a failure."
+        )
+
+
 @pytest.fixture(scope="session")
 def client():
     with TestClient(app) as c:
@@ -25,14 +60,12 @@ def client():
 
 @pytest.fixture(scope="session")
 def startup():
-    return login(os.environ["TEST_STARTUP_EMAIL"], os.environ["TEST_STARTUP_PASSWORD"])
+    return login(*_access_creds("TEST_STARTUP_EMAIL", "TEST_STARTUP_PASSWORD"))
 
 @pytest.fixture(scope="session")
 def startup_b():
-    if "TEST_STARTUP_B_EMAIL" not in os.environ or "TEST_STARTUP_B_PASSWORD" not in os.environ:
-        pytest.skip("TEST_STARTUP_B_EMAIL or TEST_STARTUP_B_PASSWORD not set")
-    return login(os.environ["TEST_STARTUP_B_EMAIL"], os.environ["TEST_STARTUP_B_PASSWORD"])
+    return login(*_access_creds("TEST_STARTUP_B_EMAIL", "TEST_STARTUP_B_PASSWORD"))
 
 @pytest.fixture(scope="session")
 def lawyer():
-    return login(os.environ["TEST_LAWYER_EMAIL"], os.environ["TEST_LAWYER_PASSWORD"])
+    return login(*_access_creds("TEST_LAWYER_EMAIL", "TEST_LAWYER_PASSWORD"))

@@ -28,8 +28,12 @@ What each citation_type must resolve to
                                  the clause must exist in the document AND the baseline entry must exist
                                  (stub baseline entries, labelled stub)
                        Any other layer (0, 2, 5, 6) is blocked, whatever the citation says.
-                       The document's clause list is an input (`DocumentContext`); with none supplied an
-                       internal citation is blocked, never assumed to be fine.
+                       Layer 1 needs only the document's own `doc_type` (taken from the document row, never
+                       from the citation string: an NDA finding citing "Schema msme/..." is blocked).
+                       Layers 3 and 4 need the clause manifest of THIS version (`DocumentContext`,
+                       app/schemas/clause_manifest.py). With no manifest they are blocked, never assumed
+                       fine. With no document context at all, every internal citation is blocked.
+                       Matching is exact everywhere: "Clause 3.1" is not "3.10", "3" is not "3.1".
 
 Who is exempt: only lawyer-added findings (`origin == ADVOCATE`), explicitly, in `check_finding`. They
 carry no layer and no agent citation. An agent-origin finding with a missing layer or citation is blocked,
@@ -53,6 +57,7 @@ from typing import Callable, Mapping, Protocol
 from fastapi import HTTPException
 
 from app.audit import write_audit
+from app.schemas.clause_manifest import ClauseManifest
 from app.schemas.finding import CitationType, Finding, FindingOrigin, Layer
 
 log = logging.getLogger("citation_gate")
@@ -68,7 +73,8 @@ class BlockReason(str, Enum):
     CLAUSE_NOT_IN_DOCUMENT = "clause_not_in_document"  # internal reference to a clause the document lacks
     NOT_IN_SCHEMA = "not_in_schema"          # Layer 1 reference to a required-clause entry that does not exist
     NOT_IN_BASELINE = "not_in_baseline"      # Layer 4 reference to a baseline entry that does not exist
-    NO_DOCUMENT_CONTEXT = "no_document_context"  # internal citation, but no clause list was supplied
+    NO_DOCUMENT_CONTEXT = "no_document_context"  # internal citation, but no document context was supplied
+    NO_CLAUSE_MANIFEST = "no_clause_manifest"    # Layer 3/4 citation, but this version has no clause manifest
 
 
 class CorpusUnavailable(Exception):
@@ -87,11 +93,17 @@ class ClauseRecord:
 class DocumentContext:
     """What the gate needs to know about the document being reviewed.
 
-    clause_numbers: the numbers of the document's parsed clauses, exactly as "Clause <n>" cites them
+    doc_type: the document row's own doc_type (Layer 1 resolves its schema entry against this).
+    clause_numbers: the clause numbers of THIS version's manifest, exactly as "Clause <n>" cites them
     ("3.1", "7", "11.2"). Matching is exact: "Clause 3" does not exist because "3.1" does.
+    None means the version has no manifest: Layers 3 and 4 then block (fail closed).
     """
     doc_type: str
-    clause_numbers: frozenset[str]
+    clause_numbers: frozenset[str] | None = None
+
+    @classmethod
+    def from_manifest(cls, doc_type: str, manifest: ClauseManifest | None) -> "DocumentContext":
+        return cls(doc_type, None if manifest is None else manifest.clause_numbers)
 
 
 class Corpus(Protocol):
@@ -105,8 +117,10 @@ class Corpus(Protocol):
     def find_clause(self, clause_id: str) -> ClauseRecord | None: ...
 
 
-# Sections named for Wednesday: ICA s.27 and s.74, MSMED Act ss.15-16. Identifiers only; no statute text.
+# Sections named for Wednesday: ICA s.27 and s.74, CPC s.20, MSMED Act ss.15-16. Identifiers only; no
+# statute text.
 STUB_STATUTES: Mapping[tuple[str, int, str], str] = {
+    ("code of civil procedure", 1908, "20"): "stub:cpc-1908-s20",
     ("indian contract act", 1872, "27"): "stub:ica-1872-s27",
     ("indian contract act", 1872, "74"): "stub:ica-1872-s74",
     ("micro, small and medium enterprises development act", 2006, "15"): "stub:msmed-2006-s15",
@@ -248,15 +262,17 @@ def _check_internal(part: str, layer: Layer | None, document: DocumentContext | 
     if m is None:
         return _block(BlockReason.MALFORMED, f"not the internal reference shape layer {layer.name} uses: {part!r}")
     if document is None:
-        return _block(BlockReason.NO_DOCUMENT_CONTEXT, "no document clause list was supplied to resolve against")
+        return _block(BlockReason.NO_DOCUMENT_CONTEXT, "no document context was supplied to resolve against")
     if layer is Layer.COMPLETENESS:
-        if m["doc"] != document.doc_type:
+        if not document.doc_type or m["doc"] != document.doc_type:
             return _block(BlockReason.NOT_IN_SCHEMA,
                           f"schema entry is for {m['doc']!r}, this document is {document.doc_type!r}")
         ref = corpus.find_schema_entry(document.doc_type, m["entry"])
         if ref is None:
             return _block(BlockReason.NOT_IN_SCHEMA, f"no such required-clause entry: {part!r}")
         return GateDecision(True, source_refs=(ref,))
+    if document.clause_numbers is None:
+        return _block(BlockReason.NO_CLAUSE_MANIFEST, "this version has no clause manifest to resolve against")
     if layer is Layer.CONSISTENCY:
         if m["a"] == m["b"]:
             return _block(BlockReason.MALFORMED, "a consistency pair needs two different clauses")

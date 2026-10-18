@@ -62,6 +62,7 @@ def screen(findings, audit=None, corpus=None, document=NDA):
     "Indian Contract Act, 1872, s. 27",
     "Indian Contract Act, 1872, s. 74",
     "Indian Contract Act, 1872, s.74",
+    "Code of Civil Procedure, 1908, s. 20",
     "indian contract act, 1872, s. 27",
     "Micro, Small and Medium Enterprises Development Act, 2006, s. 15",
     "Micro, Small and Medium Enterprises Development Act, 2006, s. 16",
@@ -189,9 +190,10 @@ def test_stub_review_fixtures_against_the_stub_corpus():
     result, _ = screen(fixtures.sample_findings(), document=fixtures.sample_document_context())
     passed = {p.finding.rule_applied for p in result.passed}
     blocked = {b.finding.rule_applied: b.reason for b in result.blocked}
-    assert passed == {"NDA_NON_COMPETE_VOID", "NDA_PENALTY_CLAUSE", "NDA_DEFINITION_MISMATCH"}
-    # CPC s.20 is not one of the stub corpus sections (ICA s.27, s.74, MSMED ss.15-16), so it is blocked.
-    assert blocked == {"NDA_GOVERNING_LAW_MISSING": BlockReason.NOT_IN_CORPUS}
+    assert passed == {"NDA_GOVERNING_LAW_MISSING", "NDA_NON_COMPETE_VOID", "NDA_PENALTY_CLAUSE",
+                      "NDA_DEFINITION_MISMATCH"}
+    # The real CPC s.20 is in the stub corpus and passes. The only block is the planted fake (ICA s. 999).
+    assert blocked == {"NDA_PLANTED_FAKE_CITATION": BlockReason.NOT_IN_CORPUS}
 
 
 def test_a_mixed_batch_keeps_order_and_logs_one_row_per_block():
@@ -341,6 +343,79 @@ def test_internal_citation_on_layers_0_2_5_6_is_blocked_and_logged(layer, citati
 def test_internal_citation_without_a_document_clause_list_is_blocked_not_assumed_fine():
     result, audit = screen([internal("Internal: Clause 3.1 vs Clause 11.2", Layer.CONSISTENCY)], document=None)
     assert reason_of(result) is BlockReason.NO_DOCUMENT_CONTEXT and len(audit.rows) == 1
+
+
+# ---- exact matching, the manifest, and fail-closed -----------------------------------------------
+
+def doc_with(*numbers, doc_type="nda"):
+    return DocumentContext(doc_type, frozenset(numbers))
+
+
+def test_clause_3_1_does_not_match_3_10_in_either_direction():
+    only_3_10 = doc_with("3.10", "11.2")
+    result, _ = screen([internal("Internal: Clause 3.1 vs Clause 11.2", Layer.CONSISTENCY)], document=only_3_10)
+    assert reason_of(result) is BlockReason.CLAUSE_NOT_IN_DOCUMENT
+    only_3_1 = doc_with("3.1", "11.2")
+    result, _ = screen([internal("Internal: Clause 3.10 vs Clause 11.2", Layer.CONSISTENCY)], document=only_3_1)
+    assert reason_of(result) is BlockReason.CLAUSE_NOT_IN_DOCUMENT
+    result, _ = screen([internal("Internal: Clause 3.1 baseline:liability-cap", Layer.RISK_ASYMMETRY)],
+                       document=only_3_10)
+    assert reason_of(result) is BlockReason.CLAUSE_NOT_IN_DOCUMENT
+
+
+@pytest.mark.parametrize("citation", [
+    "Internal: Clause 03.1 vs Clause 11.2",     # leading zero is a different string
+    "Internal: Clause 3.1. vs Clause 11.2",     # trailing dot
+    "Internal: Clause 3.1 vs Clause 11.2 ",     # trailing text is only trimmed spaces: still resolves
+])
+def test_near_miss_clause_numbers(citation):
+    result, _ = screen([internal(citation, Layer.CONSISTENCY)])
+    if citation.endswith(" "):
+        assert len(result.passed) == 1
+    else:
+        assert not result.passed and len(result.blocked) == 1
+
+
+def test_a_well_formed_reference_to_a_missing_clause_blocks_on_every_internal_layer():
+    cases = [("Internal: Clause 40 vs Clause 11.2", Layer.CONSISTENCY),
+             ("Internal: Clause 40 baseline:liability-cap", Layer.RISK_ASYMMETRY)]
+    for citation, layer in cases:
+        result, audit = screen([internal(citation, layer)])
+        assert reason_of(result) is BlockReason.CLAUSE_NOT_IN_DOCUMENT and len(audit.rows) == 1
+
+
+def test_layer_1_uses_the_documents_own_type_not_the_citation_string():
+    result, _ = screen([internal("Internal: Schema msme/indemnity", Layer.COMPLETENESS)])
+    assert reason_of(result) is BlockReason.NOT_IN_SCHEMA            # an NDA citing another type's schema
+    other_doc = doc_with("1", doc_type="msme")
+    result, _ = screen([internal("Internal: Schema nda/indemnity", Layer.COMPLETENESS)], document=other_doc)
+    assert reason_of(result) is BlockReason.NOT_IN_SCHEMA            # the string cannot choose the type
+    result, _ = screen([internal("Internal: Schema nda/indemnity", Layer.COMPLETENESS)],
+                       document=DocumentContext("", None))
+    assert reason_of(result) is BlockReason.NOT_IN_SCHEMA            # no doc type: blocked
+
+
+def test_no_manifest_blocks_layers_3_and_4_but_layer_1_needs_only_the_doc_type():
+    no_manifest = DocumentContext("nda", None)
+    for citation, layer in [("Internal: Clause 3.1 vs Clause 11.2", Layer.CONSISTENCY),
+                            ("Internal: Clause 7 baseline:liability-cap", Layer.RISK_ASYMMETRY)]:
+        result, audit = screen([internal(citation, layer)], document=no_manifest)
+        assert reason_of(result) is BlockReason.NO_CLAUSE_MANIFEST
+        assert audit.rows[0]["details"]["reason"] == "no_clause_manifest"
+    result, audit = screen([internal("Internal: Schema nda/indemnity", Layer.COMPLETENESS)], document=no_manifest)
+    assert len(result.passed) == 1 and audit.rows == []
+
+
+def test_an_empty_manifest_is_not_a_missing_manifest_and_blocks_every_clause_reference():
+    result, _ = screen([internal("Internal: Clause 3.1 vs Clause 11.2", Layer.CONSISTENCY)],
+                       document=DocumentContext("nda", frozenset()))
+    assert reason_of(result) is BlockReason.CLAUSE_NOT_IN_DOCUMENT
+
+
+def test_a_stub_manifest_feeds_the_gate_through_from_manifest():
+    ctx = DocumentContext.from_manifest("nda", fixtures.sample_clause_manifest())
+    assert ctx == fixtures.sample_document_context()
+    assert DocumentContext.from_manifest("nda", None).clause_numbers is None
 
 
 def test_statutory_citations_do_not_need_a_document_context():

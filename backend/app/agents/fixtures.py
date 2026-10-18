@@ -7,15 +7,22 @@ lawyer verifies the rulebook (see the build plan, "On hold until the lawyer veri
 import re
 
 from app.agents.citation_gate import DocumentContext
+from app.schemas.clause_manifest import ClauseManifest, ManifestClause
 from app.schemas.finding import CitationType, Finding, Layer, Severity
 
 STUB_TAG = "[STUB] "
 
 
-def sample_document_context() -> DocumentContext:
-    """STUB: the clause numbers the fixture findings point at. No parsed-clause source exists yet, so the
-    stub review has to say which clauses its NDA has; the real review gets them from the parsed document."""
-    return DocumentContext("nda", frozenset({"2", "3.1", "6", "8", "9.2", "11.2"}))
+def sample_clause_manifest(version_no: int = 1) -> ClauseManifest:
+    """STUB: the clauses the fixture findings point at, in the shape the Drafting Agent will emit per
+    version (app/schemas/clause_manifest.py). Labelled stub_fixture; no corpus ids because none exist."""
+    numbers = ("2", "3.1", "6", "8", "9.2", "11.2")
+    return ClauseManifest(version_no=version_no, produced_by="stub_fixture",
+                          clauses=tuple(ManifestClause(clause_number=n) for n in numbers))
+
+
+def sample_document_context(doc_type: str = "nda", version_no: int = 1) -> DocumentContext:
+    return DocumentContext.from_manifest(doc_type, sample_clause_manifest(version_no))
 
 
 def sample_findings() -> list[Finding]:
@@ -47,6 +54,15 @@ def sample_findings() -> list[Finding]:
             rule_applied="NDA_DEFINITION_MISMATCH",
             remedy_suggested="Keep one definition in Clause 3 and refer to it from Clause 11.",
             citation="Internal: Clause 3.1 vs Clause 11.2", citation_type=CitationType.INTERNAL_BASELINE,
+        ),
+        # PLANTED FAKE for the demo: ICA 1872 has no s. 999, so the gate must block this one. It is the only
+        # fixture meant to be blocked; the real CPC s.20 above resolves against the stub corpus.
+        Finding(
+            layer=Layer.STATUTORY, severity=Severity.MEDIUM, clause_reference="Clause 6",
+            description=STUB_TAG + "Planted fake: cites a section that does not exist, to show the gate blocking it.",
+            rule_applied="NDA_PLANTED_FAKE_CITATION",
+            remedy_suggested="None. This finding exists only to be blocked.",
+            citation="Indian Contract Act, 1872, s. 999", citation_type=CitationType.STATUTORY,
         ),
     ]
 

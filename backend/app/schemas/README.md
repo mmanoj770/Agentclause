@@ -72,3 +72,4 @@ assert check_table_matches(conn) == []
 
 - **No `INFO` severity.** `findings_severity_check` only allows low/medium/high/critical.
 - `app/findings/schemas.py` (`FindingIn`) still takes `layer` as a plain int. It is no longer used to write findings: agent findings are written only by `insert_agent_findings` (app/findings/service.py), which takes what the Layer 5 citation gate passed.
+- **No clause manifest is stored yet.** `clause_manifest.py` fixes the shape the Drafting Agent will emit per document version (clause number, corpus clause id and version). The Layer 5 gate reads it for Layers 3 and 4; a version without one fails closed. Storing it needs a nullable jsonb column on `document_versions`, which is a separate migration with its own review. The stub review passes a labelled fixture in memory.

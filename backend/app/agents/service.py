@@ -44,8 +44,11 @@ def run_review(conn, user: CurrentUser, doc_id) -> dict:
 
     # Layer 5 citation gate (R8): before ANY state change or insert, so a corpus failure (503) leaves the
     # document untouched and a retry starts clean. Blocked findings are never stored; each is logged to
-    # audit_logs on the gate's own connection. The stub's clause numbers come from a labelled fixture.
-    screened = screen_findings(fixtures.sample_findings(), doc_id, document=fixtures.sample_document_context())
+    # audit_logs on the gate's own connection. doc_type is the document's own; the clause manifest is a
+    # labelled fixture until the Drafting Agent emits one per version.
+    screened = screen_findings(
+        fixtures.sample_findings(), doc_id,
+        document=fixtures.sample_document_context(doc["doc_type"], version["version_no"]))
     with conn.transaction():
         transition(conn, doc_id, DocState.UNDER_AI_REVIEW, SYSTEM_ACTOR, "stub review started")
         created = insert_agent_findings(conn, doc["id"], version["id"], screened.passed)

@@ -112,9 +112,9 @@ def test_fixture_findings_are_valid_r1_findings():
 def test_review_moves_document_to_lawyer_queue_and_stores_findings(env):
     r = env.client.post(f"/documents/{DOC}/review")
     assert r.status_code == 200
-    # The CPC s.20 fixture is not in the stub corpus, so the gate blocks it: 3 stored, 1 blocked.
+    # CPC s.20 is in the stub corpus; the one planted fake (ICA s. 999) is blocked: 4 stored, 1 blocked.
     assert r.json() == {"state": "pending_lawyer_review", "version_no": 1,
-                        "findings_created": len(fixtures.sample_findings()) - 1, "findings_blocked": 1}
+                        "findings_created": 4, "findings_blocked": 1}
     assert env.conn.moves == ["under_ai_review", "pending_lawyer_review"]
     assert len(env.conn.findings) == r.json()["findings_created"]
     assert all(f["document_version_id"] == env.conn.version["id"] for f in env.conn.findings)
@@ -266,14 +266,15 @@ def test_other_doc_types_are_422_until_they_have_an_agent(env, route, body):
 def test_review_stores_only_what_the_gate_passed_and_logs_the_block(env):
     assert env.client.post(f"/documents/{DOC}/review").status_code == 200
     stored = {f["rule_applied"] for f in env.conn.findings}
-    assert stored == {"NDA_NON_COMPETE_VOID", "NDA_PENALTY_CLAUSE", "NDA_DEFINITION_MISMATCH"}
-    assert "NDA_GOVERNING_LAW_MISSING" not in stored          # blocked: never stored, never shown
+    assert stored == {"NDA_GOVERNING_LAW_MISSING", "NDA_NON_COMPETE_VOID", "NDA_PENALTY_CLAUSE",
+                      "NDA_DEFINITION_MISMATCH"}
+    assert "NDA_PLANTED_FAKE_CITATION" not in stored          # blocked: never stored, never shown
     (row,) = env.conn.gate_audit.rows
     assert row["action"] == "citation_blocked" and env.conn.gate_audit.committed
-    assert row["details"]["rule_applied"] == "NDA_GOVERNING_LAW_MISSING"
+    assert row["details"]["rule_applied"] == "NDA_PLANTED_FAKE_CITATION"
     assert row["details"]["reason"] == "not_in_corpus"
     findings_created = [a for a in env.conn.audit if a[3] == "findings_created"]
-    assert findings_created[0][4].obj["count"] == 3 and findings_created[0][4].obj["blocked"] == 1
+    assert findings_created[0][4].obj["count"] == 4 and findings_created[0][4].obj["blocked"] == 1
 
 
 def test_an_unreadable_corpus_is_a_generic_503_before_anything_changes(env, monkeypatch):

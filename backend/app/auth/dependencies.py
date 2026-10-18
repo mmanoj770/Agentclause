@@ -51,7 +51,7 @@ def get_current_user(
         id=claims["sub"],
         email=claims.get("email"),
         role=role,
-        org_id=claims.get("org_id"),
+        org_id=claims.get("org_id") or None,  # an empty claim means no org, never a blank id
     )
 
 def require_role(*allowed: str):

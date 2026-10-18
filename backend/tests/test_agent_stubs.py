@@ -88,7 +88,8 @@ def test_review_moves_document_to_lawyer_queue_and_stores_findings(env):
     assert env.conn.moves == ["under_ai_review", "pending_lawyer_review"]
     assert len(env.conn.findings) == r.json()["findings_created"]
     assert all(f["document_version_id"] == env.conn.version["id"] for f in env.conn.findings)
-    assert all(f["advocate_action"] is None and f["citation"] for f in env.conn.findings)
+    assert all(f["advocate_action"] is None and f["citation"] and f["citation_type"]
+               for f in env.conn.findings)
 
 
 def test_review_needs_an_uploaded_version(env):

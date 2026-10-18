@@ -5,7 +5,7 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
-from app.schemas.finding import INSERT_COLUMNS, Finding, FindingStatus, Layer, Severity
+from app.schemas.finding import INSERT_COLUMNS, CitationType, Finding, FindingStatus, Layer, Severity
 
 EXAMPLE = Path(__file__).resolve().parents[2] / "example_finding.json"
 
@@ -47,6 +47,7 @@ def test_insert_row_matches_table():
     assert tuple(row) == INSERT_COLUMNS
     assert row["layer"] == 1 and row["severity"] == "high" and row["advocate_action"] is None
     assert row["citation"] == f.citation
+    assert row["citation_type"] == f.citation_type.value
     assert Finding.from_db_row(row) == f
 
 
@@ -68,6 +69,8 @@ def test_status_maps_to_advocate_action(status, action):
     {"description": "  "},
     {"rule_applied": "governing law"},
     {"status": "done"},
+    {"citation_type": "MADE_UP"},
+    {"citation_type": "statutory"},
     {"unknown_field": 1},
 ])
 def test_invalid_findings_rejected(change):
@@ -77,10 +80,18 @@ def test_invalid_findings_rejected(change):
 
 @pytest.mark.parametrize("field", [
     "layer", "severity", "clause_reference", "description",
-    "rule_applied", "remedy_suggested", "citation",
+    "rule_applied", "remedy_suggested", "citation", "citation_type",
 ])
 def test_required_fields(field):
     data = load_example()
     del data[field]
     with pytest.raises(ValidationError):
         Finding.model_validate(data)
+
+
+def test_citation_type_values_fixed():
+    # Stored in findings.citation_type (migration 18 check constraint): never rename or add one here alone.
+    assert {c.name: c.value for c in CitationType} == {
+        "STATUTORY": "STATUTORY", "CASE": "CASE", "CORPUS": "CORPUS",
+        "INTERNAL_BASELINE": "INTERNAL_BASELINE",
+    }

@@ -6,7 +6,7 @@ lawyer verifies the rulebook (see the build plan, "On hold until the lawyer veri
 """
 import re
 
-from app.schemas.finding import Finding, Layer, Severity
+from app.schemas.finding import CitationType, Finding, Layer, Severity
 
 STUB_TAG = "[STUB] "
 
@@ -18,28 +18,28 @@ def sample_findings() -> list[Finding]:
             description=STUB_TAG + "No governing-law and jurisdiction clause.",
             rule_applied="NDA_GOVERNING_LAW_MISSING",
             remedy_suggested="Add a governing-law and jurisdiction clause naming Indian law and a seat.",
-            citation="Code of Civil Procedure, 1908, s. 20",
+            citation="Code of Civil Procedure, 1908, s. 20", citation_type=CitationType.STATUTORY,
         ),
         Finding(
             layer=Layer.STATUTORY, severity=Severity.CRITICAL, clause_reference="Clause 8",
             description=STUB_TAG + "Post-termination non-compete restrains trade and is likely void.",
             rule_applied="NDA_NON_COMPETE_VOID",
             remedy_suggested="Delete the non-compete or narrow it to confidentiality and non-solicitation.",
-            citation="Indian Contract Act, 1872, s. 27",
+            citation="Indian Contract Act, 1872, s. 27", citation_type=CitationType.STATUTORY,
         ),
         Finding(
             layer=Layer.STATUTORY, severity=Severity.MEDIUM, clause_reference="Clause 9.2",
             description=STUB_TAG + "Fixed penalty for breach is not a genuine pre-estimate of loss.",
             rule_applied="NDA_PENALTY_CLAUSE",
             remedy_suggested="Replace the fixed sum with reasonable compensation for proven loss.",
-            citation="Indian Contract Act, 1872, s. 74",
+            citation="Indian Contract Act, 1872, s. 74", citation_type=CitationType.STATUTORY,
         ),
         Finding(
             layer=Layer.CONSISTENCY, severity=Severity.LOW, clause_reference="Clause 3 / Clause 11",
             description=STUB_TAG + "'Confidential Information' is defined differently in two clauses.",
             rule_applied="NDA_DEFINITION_MISMATCH",
             remedy_suggested="Keep one definition in Clause 3 and refer to it from Clause 11.",
-            citation="Internal: Clause 3.1 vs Clause 11.2",
+            citation="Internal: Clause 3.1 vs Clause 11.2", citation_type=CitationType.INTERNAL_BASELINE,
         ),
     ]
 

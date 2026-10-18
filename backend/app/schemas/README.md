@@ -71,4 +71,4 @@ assert check_table_matches(conn) == []
 ## Known gaps
 
 - **No `INFO` severity.** `findings_severity_check` only allows low/medium/high/critical.
-- `app/findings/schemas.py` (`FindingIn`) still takes `layer` as a plain int and is what `create_findings` uses today.
+- `app/findings/schemas.py` (`FindingIn`) still takes `layer` as a plain int. It is no longer used to write findings: agent findings are written only by `insert_agent_findings` (app/findings/service.py), which takes what the Layer 5 citation gate passed.

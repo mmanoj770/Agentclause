@@ -4,7 +4,9 @@ import uuid
 import pytest
 from fastapi.testclient import TestClient
 
-from app.agents import fixtures, service
+from contextlib import contextmanager
+
+from app.agents import citation_gate, fixtures, service
 from app.auth.dependencies import CurrentUser, get_current_user
 from app.db import get_conn
 from app.main import app
@@ -42,6 +44,8 @@ class FakeConn:
             return Result([self.doc] if str(params[0]) == DOC else [])
         if s.startswith("select id, version_no from document_versions"):
             return Result([self.version] if self.version else [])
+        if s.startswith("select 1 from document_versions where id"):
+            return Result([{"?column?": 1}] if self.version and params[0] == self.version["id"] else [])
         if s.startswith("select 1 from findings where document_version_id"):
             return Result([{"?column?": 1}] if any(f["document_version_id"] == params[0]
                                                     for f in self.findings) else [])
@@ -54,9 +58,34 @@ class FakeConn:
         raise AssertionError(f"unexpected SQL: {s}")
 
 
+class GateAudit:
+    """The citation gate writes its audit rows on its OWN connection; this stands in for that one."""
+    def __init__(self):
+        self.rows, self.committed = [], False
+
+    @contextmanager
+    def connection(self):
+        outer = self
+
+        class Tx:
+            def __enter__(s): return s
+            def __exit__(s, exc_type, *a):
+                outer.committed = exc_type is None
+                return False
+
+        class C:
+            def transaction(s): return Tx()
+            def execute(s, sql, params=()):
+                assert "insert into audit_logs" in " ".join(sql.split())
+                outer.rows.append({"action": params[3], "details": params[4].obj})
+        yield C()
+
+
 @pytest.fixture
 def env(monkeypatch):
     conn = FakeConn()
+    conn.gate_audit = GateAudit()
+    monkeypatch.setattr(citation_gate, "_pool_connection", conn.gate_audit.connection)
 
     def fake_transition(c, doc_id, to_state, actor, note=None):
         assert actor.kind == "system"
@@ -83,8 +112,9 @@ def test_fixture_findings_are_valid_r1_findings():
 def test_review_moves_document_to_lawyer_queue_and_stores_findings(env):
     r = env.client.post(f"/documents/{DOC}/review")
     assert r.status_code == 200
+    # The CPC s.20 fixture is not in the stub corpus, so the gate blocks it: 3 stored, 1 blocked.
     assert r.json() == {"state": "pending_lawyer_review", "version_no": 1,
-                        "findings_created": len(fixtures.sample_findings())}
+                        "findings_created": len(fixtures.sample_findings()) - 1, "findings_blocked": 1}
     assert env.conn.moves == ["under_ai_review", "pending_lawyer_review"]
     assert len(env.conn.findings) == r.json()["findings_created"]
     assert all(f["document_version_id"] == env.conn.version["id"] for f in env.conn.findings)
@@ -229,3 +259,47 @@ def test_other_doc_types_are_422_until_they_have_an_agent(env, route, body):
     r = env.client.post(f"/documents/{DOC}/{route}", json=body)
     assert r.status_code == 422 and "only available for NDAs" in r.json()["detail"]
     assert env.conn.findings == [] and env.conn.moves == [] and env.conn.audit == []
+
+
+# ---- the Layer 5 citation gate in the review path ------------------------------------------------
+
+def test_review_stores_only_what_the_gate_passed_and_logs_the_block(env):
+    assert env.client.post(f"/documents/{DOC}/review").status_code == 200
+    stored = {f["rule_applied"] for f in env.conn.findings}
+    assert stored == {"NDA_NON_COMPETE_VOID", "NDA_PENALTY_CLAUSE", "NDA_DEFINITION_MISMATCH"}
+    assert "NDA_GOVERNING_LAW_MISSING" not in stored          # blocked: never stored, never shown
+    (row,) = env.conn.gate_audit.rows
+    assert row["action"] == "citation_blocked" and env.conn.gate_audit.committed
+    assert row["details"]["rule_applied"] == "NDA_GOVERNING_LAW_MISSING"
+    assert row["details"]["reason"] == "not_in_corpus"
+    findings_created = [a for a in env.conn.audit if a[3] == "findings_created"]
+    assert findings_created[0][4].obj["count"] == 3 and findings_created[0][4].obj["blocked"] == 1
+
+
+def test_an_unreadable_corpus_is_a_generic_503_before_anything_changes(env, monkeypatch):
+    monkeypatch.setattr(citation_gate, "default_corpus", lambda: citation_gate.StubFixtureCorpus(statutes={}))
+    r = env.client.post(f"/documents/{DOC}/review")
+    assert r.status_code == 503 and r.json()["detail"] == citation_gate.GENERIC_503
+    assert env.conn.moves == [] and env.conn.findings == []          # no state moved, nothing stored
+    assert env.conn.doc["state"] == "drafted"
+    (row,) = env.conn.gate_audit.rows
+    assert row["action"] == "citation_gate_aborted"
+    # A retry once the corpus is back starts from a clean slate.
+    monkeypatch.undo()
+    monkeypatch.setattr(service, "transition", lambda c, d, t, a, n=None: env.conn.doc)
+    monkeypatch.setattr(citation_gate, "_pool_connection", env.conn.gate_audit.connection)
+    assert env.client.post(f"/documents/{DOC}/review").status_code == 200
+
+
+def test_the_one_write_path_takes_gate_results_and_refuses_advocate_origin():
+    from app.agents.citation_gate import PassedFinding
+    from app.findings.service import insert_agent_findings
+    from app.schemas.finding import FindingOrigin
+
+    class Conn:
+        def execute(self, sql, params=()):
+            return Result([{"?column?": 1}])
+
+    advocate = fixtures.sample_findings()[1].model_copy(update={"origin": FindingOrigin.ADVOCATE})
+    with pytest.raises(ValueError, match="agent-origin"):
+        insert_agent_findings(Conn(), uuid.uuid4(), uuid.uuid4(), [PassedFinding(advocate, ())])

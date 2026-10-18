@@ -3,30 +3,33 @@ from fastapi import HTTPException
 from app.audit import write_audit
 from app.auth.dependencies import CurrentUser
 from app.documents.service import get_document
-from app.findings.schemas import AdjudicateIn, FindingIn, LawyerFindingIn
+from app.agents.citation_gate import PassedFinding
+from app.findings.schemas import AdjudicateIn, LawyerFindingIn
+from app.schemas.finding import INSERT_COLUMNS, FindingOrigin
 
 
-def create_findings(conn, document_id, version_id, items: list[FindingIn]) -> int:
-    """Called by the pipeline (not exposed as an API route)."""
-    with conn.transaction():
-        ok = conn.execute(
-            "select 1 from document_versions where id = %s and document_id = %s",
-            (version_id, document_id),
-        ).fetchone()
-        if ok is None:
-            raise ValueError("version does not belong to this document")
-        for f in items:
-            conn.execute(
-                """insert into findings (document_id, document_version_id, layer, severity,
-                       clause_reference, description, rule_applied, remedy_suggested)
-                   values (%s, %s, %s, %s, %s, %s, %s, %s)""",
-                (document_id, version_id, f.layer, f.severity, f.clause_reference,
-                 f.description, f.rule_applied, f.remedy_suggested),
-            )
-        write_audit(conn, document_id=document_id, actor_id=None, actor_role="system",
-                    action="findings_created",
-                    details={"count": len(items), "version_id": str(version_id)})
-    return len(items)
+def insert_agent_findings(conn, document_id, version_id, passed: list[PassedFinding]) -> int:
+    """The one place agent findings are written (not exposed as an API route).
+
+    It takes only what the Layer 5 citation gate passed (`GateResult.passed`), never raw findings,
+    so an unscreened finding cannot be stored by mistake. Runs inside the caller's transaction and
+    writes no audit row; the caller records `findings_created`. Every column, including `citation`
+    and `citation_type`, comes from the Finding model (INSERT_COLUMNS).
+    """
+    ok = conn.execute(
+        "select 1 from document_versions where id = %s and document_id = %s",
+        (version_id, document_id),
+    ).fetchone()
+    if ok is None:
+        raise ValueError("version does not belong to this document")
+    columns = ", ".join(INSERT_COLUMNS)
+    marks = ", ".join(["%s"] * len(INSERT_COLUMNS))
+    for p in passed:
+        if p.finding.origin is not FindingOrigin.AGENT:
+            raise ValueError("only agent-origin findings are written here; lawyer-added findings have their own route")
+        row = p.finding.to_insert_row(document_id, version_id)
+        conn.execute(f"insert into findings ({columns}) values ({marks})", tuple(row[c] for c in INSERT_COLUMNS))
+    return len(passed)
 
 
 def list_findings(conn, user: CurrentUser, doc_id, layer: int | None, severity: str | None):

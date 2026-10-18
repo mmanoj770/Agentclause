@@ -3,9 +3,10 @@ from fastapi import HTTPException
 from app.audit import write_audit
 from app.auth.dependencies import CurrentUser
 from app.agents import fixtures
+from app.agents.citation_gate import screen_findings
 from app.documents.service import Actor, get_document, transition
+from app.findings.service import insert_agent_findings
 from app.documents.states import DocState
-from app.schemas.finding import INSERT_COLUMNS
 
 SYSTEM_ACTOR = Actor(kind="system")  # TODO(decision): a real system actor id for audit rows
 REVIEWABLE = frozenset({DocState.DRAFTED, DocState.REVISION_IN_PROGRESS})
@@ -41,22 +42,21 @@ def run_review(conn, user: CurrentUser, doc_id) -> dict:
                     (version["id"],)).fetchone():
         raise HTTPException(409, "This version has already been reviewed; upload a revised version")
 
-    findings = fixtures.sample_findings()
-    columns = ", ".join(INSERT_COLUMNS)
-    marks = ", ".join(["%s"] * len(INSERT_COLUMNS))
+    # Layer 5 citation gate (R8): before ANY state change or insert, so a corpus failure (503) leaves the
+    # document untouched and a retry starts clean. Blocked findings are never stored; each is logged to
+    # audit_logs on the gate's own connection. The stub's clause numbers come from a labelled fixture.
+    screened = screen_findings(fixtures.sample_findings(), doc_id, document=fixtures.sample_document_context())
     with conn.transaction():
         transition(conn, doc_id, DocState.UNDER_AI_REVIEW, SYSTEM_ACTOR, "stub review started")
-        for f in findings:
-            row = f.to_insert_row(doc["id"], version["id"])
-            conn.execute(f"insert into findings ({columns}) values ({marks})",
-                         tuple(row[c] for c in INSERT_COLUMNS))
+        created = insert_agent_findings(conn, doc["id"], version["id"], screened.passed)
         write_audit(conn, document_id=doc_id, actor_id=None, actor_role="system",
                     action="findings_created",
-                    details={"count": len(findings), "version_no": version["version_no"], "stub": True})
+                    details={"count": created, "blocked": len(screened.blocked),
+                             "version_no": version["version_no"], "stub": True})
         updated = transition(conn, doc_id, DocState.PENDING_LAWYER_REVIEW, SYSTEM_ACTOR,
                              "stub review finished")
     return {"state": updated["state"], "version_no": version["version_no"],
-            "findings_created": len(findings)}
+            "findings_created": created, "findings_blocked": len(screened.blocked)}
 
 
 def chat_turn(conn, user: CurrentUser, doc_id, question: str) -> dict:

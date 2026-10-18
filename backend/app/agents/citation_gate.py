@@ -16,9 +16,25 @@ What each citation_type must resolve to
     STATUTORY          a statute section present in the corpus ("<Act>, <year>, s. <n>")
     CASE               a case present in the corpus
     CORPUS             a clause present in the corpus AND marked verified
-    INTERNAL_BASELINE  a recognised internal reference ("Internal: Clause 3.1 vs Clause 11.2") on a
-                       layer allowed to use one. The "Internal:" prefix alone decides nothing:
-                       "Internal: made up" is blocked.
+    INTERNAL_BASELINE  an internal reference that RESOLVES against the real document or a schema, on a
+                       layer allowed to use one. The "Internal:" prefix alone decides nothing, and a
+                       well-formed reference to something that does not exist is blocked:
+                         Layer 1 (completeness)  "Internal: Schema nda/indemnity"
+                                 the required-clause schema entry for THIS document's type (the clause
+                                 is usually missing, so there is nothing in the document to point at)
+                         Layer 3 (consistency)   "Internal: Clause 3.1 vs Clause 11.2"
+                                 both clauses of the pair must exist in the document's parsed clauses
+                         Layer 4 (risk asymmetry) "Internal: Clause 7 baseline:liability-cap"
+                                 the clause must exist in the document AND the baseline entry must exist
+                                 (stub baseline entries, labelled stub)
+                       Any other layer (0, 2, 5, 6) is blocked, whatever the citation says.
+                       The document's clause list is an input (`DocumentContext`); with none supplied an
+                       internal citation is blocked, never assumed to be fine.
+
+Who is exempt: only lawyer-added findings (`origin == ADVOCATE`), explicitly, in `check_finding`. They
+carry no layer and no agent citation. An agent-origin finding with a missing layer or citation is blocked,
+never waved through, and an advocate-origin finding that carries a layer or citation is blocked as
+inconsistent. `origin` is set by server code, not read from agent output.
 
 The Wednesday corpus is `StubFixtureCorpus`: a labelled stub (statute sections only, no statute text),
 not lawyer-verified. Its source refs all start with "stub:". Swap in the real corpus later by
@@ -37,7 +53,7 @@ from typing import Callable, Mapping, Protocol
 from fastapi import HTTPException
 
 from app.audit import write_audit
-from app.schemas.finding import CitationType, Finding, Layer
+from app.schemas.finding import CitationType, Finding, FindingOrigin, Layer
 
 log = logging.getLogger("citation_gate")
 
@@ -49,6 +65,10 @@ class BlockReason(str, Enum):
     NOT_IN_CORPUS = "not_in_corpus"          # well formed, but the corpus has no such source
     UNVERIFIED_CLAUSE = "unverified_clause"  # CORPUS citation names a clause that is not verified
     LAYER_NOT_ALLOWED = "layer_not_allowed"  # INTERNAL_BASELINE on a layer that may not use one
+    CLAUSE_NOT_IN_DOCUMENT = "clause_not_in_document"  # internal reference to a clause the document lacks
+    NOT_IN_SCHEMA = "not_in_schema"          # Layer 1 reference to a required-clause entry that does not exist
+    NOT_IN_BASELINE = "not_in_baseline"      # Layer 4 reference to a baseline entry that does not exist
+    NO_DOCUMENT_CONTEXT = "no_document_context"  # internal citation, but no clause list was supplied
 
 
 class CorpusUnavailable(Exception):
@@ -63,10 +83,23 @@ class ClauseRecord:
     verified: bool
 
 
+@dataclass(frozen=True)
+class DocumentContext:
+    """What the gate needs to know about the document being reviewed.
+
+    clause_numbers: the numbers of the document's parsed clauses, exactly as "Clause <n>" cites them
+    ("3.1", "7", "11.2"). Matching is exact: "Clause 3" does not exist because "3.1" does.
+    """
+    doc_type: str
+    clause_numbers: frozenset[str]
+
+
 class Corpus(Protocol):
     is_stub: bool
 
     def ensure_readable(self) -> None: ...
+    def find_schema_entry(self, doc_type: str, entry: str) -> str | None: ...
+    def find_baseline_entry(self, entry: str) -> str | None: ...
     def find_statute(self, act: str, year: int, section: str) -> str | None: ...
     def find_case(self, citation: str) -> str | None: ...
     def find_clause(self, clause_id: str) -> ClauseRecord | None: ...
@@ -81,6 +114,19 @@ STUB_STATUTES: Mapping[tuple[str, int, str], str] = {
 }
 
 
+# Required-clause schema (Layer 1) and risk baselines (Layer 4). Invented placeholders for the demo, NOT
+# lawyer-verified. Entry ids only; no text. There is no real baseline dataset yet.
+STUB_SCHEMA_ENTRIES: Mapping[str, frozenset[str]] = {
+    "nda": frozenset({"definition", "confidentiality", "term", "governing_law", "dispute_resolution",
+                      "indemnity", "return_of_information"}),
+}
+STUB_BASELINES: Mapping[str, str] = {
+    "liability-cap": "stub:baseline-liability-cap",
+    "indemnity-scope": "stub:baseline-indemnity-scope",
+    "penalty-vs-damages": "stub:baseline-penalty-vs-damages",
+}
+
+
 class StubFixtureCorpus:
     """Labelled stub corpus for the demo. NOT lawyer-verified. Every source ref starts with "stub:"."""
     is_stub = True
@@ -88,10 +134,20 @@ class StubFixtureCorpus:
 
     def __init__(self, statutes: Mapping | None = STUB_STATUTES,
                  clauses: Mapping[str, ClauseRecord] | None = None,
-                 cases: Mapping[str, str] | None = None):
+                 cases: Mapping[str, str] | None = None,
+                 schemas: Mapping[str, frozenset[str]] | None = None,
+                 baselines: Mapping[str, str] | None = None):
         self._statutes = statutes
         self._clauses = {} if clauses is None else clauses
         self._cases = {} if cases is None else cases
+        self._schemas = STUB_SCHEMA_ENTRIES if schemas is None else schemas
+        self._baselines = STUB_BASELINES if baselines is None else baselines
+
+    def find_schema_entry(self, doc_type: str, entry: str) -> str | None:
+        return f"stub:schema-{doc_type}-{entry}" if entry in self._schemas.get(doc_type, ()) else None
+
+    def find_baseline_entry(self, entry: str) -> str | None:
+        return self._baselines.get(entry)
 
     def ensure_readable(self) -> None:
         if not isinstance(self._statutes, Mapping) or not self._statutes:
@@ -115,12 +171,18 @@ def default_corpus() -> Corpus:
 
 _STATUTE = re.compile(
     r"(?P<act>[A-Za-z][A-Za-z ,&()'\-]*?), (?P<year>\d{4}), s\. ?(?P<section>\d{1,4}[A-Z]?)", re.ASCII)
-_INTERNAL = re.compile(r"Internal: Clause \d+(\.\d+)* vs Clause \d+(\.\d+)*", re.ASCII)
+_NUM = r"\d+(?:\.\d+)*"
+_INTERNAL_PAIR = re.compile(rf"Internal: Clause (?P<a>{_NUM}) vs Clause (?P<b>{_NUM})", re.ASCII)
+_INTERNAL_SCHEMA = re.compile(r"Internal: Schema (?P<doc>[a-z_]{1,40})/(?P<entry>[a-z_]{1,64})", re.ASCII)
+_INTERNAL_BASELINE = re.compile(
+    rf"Internal: Clause (?P<clause>{_NUM}) baseline:(?P<entry>[a-z0-9\-]{{1,64}})", re.ASCII)
 _CLAUSE = re.compile(r"clause:(?P<id>[A-Za-z0-9_\-]{1,64})", re.ASCII)
 _MULTI_SPACE = re.compile(r" {2,}")
 
-# Layers that may cite an internal reference: completeness, cross-clause consistency, risk asymmetry.
+# Layers that may cite an internal reference: 1 completeness, 3 cross-clause consistency, 4 risk asymmetry.
+# Each has exactly one reference shape. Layers 0, 2 (statutory), 5 and 6 may not cite one at all.
 INTERNAL_LAYERS = frozenset({Layer.COMPLETENESS, Layer.CONSISTENCY, Layer.RISK_ASYMMETRY})
+GATE_EXEMPT_ORIGINS = frozenset({FindingOrigin.ADVOCATE})
 
 
 def _normalise(text: str) -> str:
@@ -169,18 +231,61 @@ def _check_corpus_clause(part: str, corpus: Corpus) -> GateDecision:
     return GateDecision(True, source_refs=(rec.source_ref,))
 
 
-def _check_internal(part: str, layer: Layer | None) -> GateDecision:
-    if _INTERNAL.fullmatch(part) is None:
-        return _block(BlockReason.MALFORMED, f"not a recognised internal reference: {part!r}")
+def _clause_missing(num: str, document: DocumentContext) -> GateDecision | None:
+    if num not in document.clause_numbers:
+        return _block(BlockReason.CLAUSE_NOT_IN_DOCUMENT, f"Clause {num} is not in this document")
+    return None
+
+
+def _check_internal(part: str, layer: Layer | None, document: DocumentContext | None,
+                    corpus: Corpus) -> GateDecision:
     if layer not in INTERNAL_LAYERS:
         name = layer.name if layer is not None else "none"
         return _block(BlockReason.LAYER_NOT_ALLOWED, f"layer {name} may not cite an internal baseline")
-    return GateDecision(True)
+    shape = {Layer.COMPLETENESS: _INTERNAL_SCHEMA, Layer.CONSISTENCY: _INTERNAL_PAIR,
+             Layer.RISK_ASYMMETRY: _INTERNAL_BASELINE}[layer]
+    m = shape.fullmatch(part)
+    if m is None:
+        return _block(BlockReason.MALFORMED, f"not the internal reference shape layer {layer.name} uses: {part!r}")
+    if document is None:
+        return _block(BlockReason.NO_DOCUMENT_CONTEXT, "no document clause list was supplied to resolve against")
+    if layer is Layer.COMPLETENESS:
+        if m["doc"] != document.doc_type:
+            return _block(BlockReason.NOT_IN_SCHEMA,
+                          f"schema entry is for {m['doc']!r}, this document is {document.doc_type!r}")
+        ref = corpus.find_schema_entry(document.doc_type, m["entry"])
+        if ref is None:
+            return _block(BlockReason.NOT_IN_SCHEMA, f"no such required-clause entry: {part!r}")
+        return GateDecision(True, source_refs=(ref,))
+    if layer is Layer.CONSISTENCY:
+        if m["a"] == m["b"]:
+            return _block(BlockReason.MALFORMED, "a consistency pair needs two different clauses")
+        for num in (m["a"], m["b"]):
+            if (missing := _clause_missing(num, document)) is not None:
+                return missing
+        return GateDecision(True)
+    if (missing := _clause_missing(m["clause"], document)) is not None:
+        return missing
+    ref = corpus.find_baseline_entry(m["entry"])
+    if ref is None:
+        return _block(BlockReason.NOT_IN_BASELINE, f"no such baseline entry: {part!r}")
+    return GateDecision(True, source_refs=(ref,))
 
 
-def check_finding(finding: Finding, corpus: Corpus) -> GateDecision:
+def check_finding(finding: Finding, corpus: Corpus, document: DocumentContext | None = None) -> GateDecision:
     """Decide one finding. A citation string may hold several parts separated by ';'; every part must resolve."""
-    text = _normalise(finding.citation or "")
+    layer = getattr(finding, "layer", None)
+    citation = getattr(finding, "citation", None)
+    ctype = getattr(finding, "citation_type", None)
+    # The one exemption, written out: lawyer-added findings are the advocate's own work, not agent output.
+    # It keys on origin, never on a null layer or citation, so an agent finding missing either is blocked below.
+    if getattr(finding, "origin", FindingOrigin.AGENT) in GATE_EXEMPT_ORIGINS:
+        if layer is not None or citation is not None or ctype is not None:
+            return _block(BlockReason.MALFORMED, "advocate-origin finding carries an agent layer or citation")
+        return GateDecision(True)
+    if not isinstance(layer, Layer):
+        return _block(BlockReason.MALFORMED, "agent finding has no layer")
+    text = _normalise(citation or "")
     if not text:
         return _block(BlockReason.MALFORMED, "empty citation")
     refs: list[str] = []
@@ -195,7 +300,7 @@ def check_finding(finding: Finding, corpus: Corpus) -> GateDecision:
         elif finding.citation_type is CitationType.CORPUS:
             d = _check_corpus_clause(part, corpus)
         else:
-            d = _check_internal(part, finding.layer)
+            d = _check_internal(part, layer, document, corpus)
         if not d.allowed:
             return d
         refs.extend(d.source_refs)
@@ -223,13 +328,13 @@ class GateResult:
     blocked: list[BlockedFinding] = field(default_factory=list)
 
 
-def run_gate(findings: list[Finding], corpus: Corpus) -> GateResult:
+def run_gate(findings: list[Finding], corpus: Corpus, document: DocumentContext | None = None) -> GateResult:
     """Pure decision, no I/O. Raises CorpusUnavailable if the corpus cannot be read (nothing is partial)."""
     corpus.ensure_readable()
     result = GateResult()
     for f in findings:
         try:
-            d = check_finding(f, corpus)
+            d = check_finding(f, corpus, document)
         except CorpusUnavailable:
             raise
         except Exception as e:  # a corpus that errors mid-run is an unreadable corpus: fail closed
@@ -259,8 +364,10 @@ def _write_audit_rows(rows: list[dict], audit_conn: Callable | None) -> None:
 def _block_details(b: BlockedFinding, corpus: Corpus) -> dict:
     f = b.finding
     return {
-        "finding_id": str(f.finding_id), "layer": f.layer.name, "rule_applied": f.rule_applied,
-        "citation": f.citation, "citation_type": f.citation_type.value,
+        "finding_id": str(getattr(f, "finding_id", None)),
+        "layer": getattr(getattr(f, "layer", None), "name", None),
+        "rule_applied": getattr(f, "rule_applied", None), "citation": getattr(f, "citation", None),
+        "citation_type": getattr(getattr(f, "citation_type", None), "value", None),
         "reason": b.reason.value, "detail": b.detail, "corpus_is_stub": corpus.is_stub,
         "payload": f.model_dump(mode="json"),
     }
@@ -288,6 +395,7 @@ def log_abort(document_id, error: Exception, audit_conn: Callable | None = None)
 
 
 def screen_findings(findings: list[Finding], document_id, *, corpus: Corpus | None = None,
+                    document: DocumentContext | None = None,
                     audit_conn: Callable | None = None) -> GateResult:
     """Gate + logging. Call before any state transition or insert; insert `result.passed` only.
 
@@ -295,7 +403,7 @@ def screen_findings(findings: list[Finding], document_id, *, corpus: Corpus | No
     """
     corpus = corpus or default_corpus()
     try:
-        result = run_gate(findings, corpus)
+        result = run_gate(findings, corpus, document)
     except CorpusUnavailable as e:
         log_abort(document_id, e, audit_conn)
         raise HTTPException(503, GENERIC_503) from e

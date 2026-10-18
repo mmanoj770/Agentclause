@@ -8,10 +8,11 @@ from fastapi import HTTPException
 
 from app.agents import citation_gate as gate
 from app.agents import fixtures
-from app.agents.citation_gate import BlockReason, ClauseRecord, StubFixtureCorpus
-from app.schemas.finding import CitationType, Finding, Layer, Severity
+from app.agents.citation_gate import BlockReason, ClauseRecord, DocumentContext, StubFixtureCorpus
+from app.schemas.finding import CitationType, Finding, FindingOrigin, Layer, Severity
 
 DOC = uuid.uuid4()
+NDA = DocumentContext("nda", frozenset({"3.1", "7", "8", "9.2", "11.2"}))
 
 
 def make(citation, ctype=CitationType.STATUTORY, layer=Layer.STATUTORY, **kw) -> Finding:
@@ -50,9 +51,9 @@ class AuditConn:
                           "action": params[3], "details": params[4].obj})
 
 
-def screen(findings, audit=None, corpus=None):
+def screen(findings, audit=None, corpus=None, document=NDA):
     audit = audit or AuditConn()
-    return gate.screen_findings(findings, DOC, corpus=corpus, audit_conn=audit.factory), audit
+    return gate.screen_findings(findings, DOC, corpus=corpus, document=document, audit_conn=audit.factory), audit
 
 
 # ---- what passes -------------------------------------------------------------------------------
@@ -185,7 +186,7 @@ def test_corpus_citations_resolve_only_for_verified_clauses():
 
 
 def test_stub_review_fixtures_against_the_stub_corpus():
-    result, _ = screen(fixtures.sample_findings())
+    result, _ = screen(fixtures.sample_findings(), document=fixtures.sample_document_context())
     passed = {p.finding.rule_applied for p in result.passed}
     blocked = {b.finding.rule_applied: b.reason for b in result.blocked}
     assert passed == {"NDA_NON_COMPETE_VOID", "NDA_PENALTY_CLAUSE", "NDA_DEFINITION_MISMATCH"}
@@ -251,3 +252,136 @@ def test_the_gate_writes_nothing_to_the_callers_connection():
     # transaction, so a rollback there cannot erase them.
     import inspect
     assert "conn" not in inspect.signature(gate.screen_findings).parameters
+
+
+# ---- INTERNAL_BASELINE resolves against the real document (Tejaswi's review) -------------------------
+
+def internal(citation, layer):
+    return make(citation, CitationType.INTERNAL_BASELINE, layer)
+
+
+def reason_of(result):
+    assert len(result.blocked) == 1 and not result.passed
+    return result.blocked[0].reason
+
+
+def test_internal_clause_that_exists_passes_on_layer_3():
+    result, audit = screen([internal("Internal: Clause 3.1 vs Clause 11.2", Layer.CONSISTENCY)])
+    assert len(result.passed) == 1 and audit.rows == []
+
+
+@pytest.mark.parametrize("citation", [
+    "Internal: Clause 99 vs Clause 11.2",     # well formed, first clause does not exist
+    "Internal: Clause 3.1 vs Clause 99",      # second clause does not exist
+    "Internal: Clause 3 vs Clause 11.2",      # "3" is not "3.1": matching is exact
+    "Internal: Clause 12 vs Clause 13",
+])
+def test_internal_reference_to_a_clause_the_document_lacks_is_blocked_and_logged(citation):
+    result, audit = screen([internal(citation, Layer.CONSISTENCY)])
+    assert reason_of(result) is BlockReason.CLAUSE_NOT_IN_DOCUMENT
+    (row,) = audit.rows
+    assert row["action"] == "citation_blocked" and row["details"]["reason"] == "clause_not_in_document"
+
+
+def test_layer_3_pair_needs_two_different_clauses():
+    result, _ = screen([internal("Internal: Clause 3.1 vs Clause 3.1", Layer.CONSISTENCY)])
+    assert reason_of(result) is BlockReason.MALFORMED
+
+
+def test_layer_4_needs_the_clause_and_a_baseline_entry():
+    ok, _ = screen([internal("Internal: Clause 7 baseline:liability-cap", Layer.RISK_ASYMMETRY)])
+    assert len(ok.passed) == 1 and ok.passed[0].source_refs == ("stub:baseline-liability-cap",)
+    no_clause, _ = screen([internal("Internal: Clause 70 baseline:liability-cap", Layer.RISK_ASYMMETRY)])
+    assert reason_of(no_clause) is BlockReason.CLAUSE_NOT_IN_DOCUMENT
+    no_entry, _ = screen([internal("Internal: Clause 7 baseline:made-up", Layer.RISK_ASYMMETRY)])
+    assert reason_of(no_entry) is BlockReason.NOT_IN_BASELINE
+
+
+def test_the_stub_baseline_entries_are_labelled_stub():
+    assert all(ref.startswith("stub:") for ref in gate.STUB_BASELINES.values())
+
+
+def test_layer_1_resolves_against_the_schema_not_the_document():
+    # "indemnity" is a required NDA clause that is absent from the document: that is the finding.
+    assert "indemnity" not in " ".join(NDA.clause_numbers)
+    ok, audit = screen([internal("Internal: Schema nda/indemnity", Layer.COMPLETENESS)])
+    assert len(ok.passed) == 1 and audit.rows == []
+    assert ok.passed[0].source_refs == ("stub:schema-nda-indemnity",)
+
+
+@pytest.mark.parametrize("citation", [
+    "Internal: Schema nda/made_up_entry",    # no such entry
+    "Internal: Schema msa/indemnity",        # entry for a different document type
+])
+def test_layer_1_schema_reference_that_does_not_resolve_is_blocked(citation):
+    result, audit = screen([internal(citation, Layer.COMPLETENESS)])
+    assert reason_of(result) is BlockReason.NOT_IN_SCHEMA and len(audit.rows) == 1
+
+
+def test_each_layer_accepts_only_its_own_internal_shape():
+    pair = "Internal: Clause 3.1 vs Clause 11.2"
+    for layer in (Layer.COMPLETENESS, Layer.RISK_ASYMMETRY):
+        result, _ = screen([internal(pair, layer)])
+        assert reason_of(result) is BlockReason.MALFORMED
+    result, _ = screen([internal("Internal: Schema nda/indemnity", Layer.CONSISTENCY)])
+    assert reason_of(result) is BlockReason.MALFORMED
+
+
+@pytest.mark.parametrize("layer", [Layer.INTAKE, Layer.STATUTORY, Layer.CITATION_GATE, Layer.TRIAGE])
+@pytest.mark.parametrize("citation", [
+    "Internal: Clause 3.1 vs Clause 11.2", "Internal: Schema nda/indemnity",
+    "Internal: Clause 7 baseline:liability-cap",
+])
+def test_internal_citation_on_layers_0_2_5_6_is_blocked_and_logged(layer, citation):
+    result, audit = screen([internal(citation, layer)])
+    assert reason_of(result) is BlockReason.LAYER_NOT_ALLOWED
+    assert [r["action"] for r in audit.rows] == ["citation_blocked"]
+
+
+def test_internal_citation_without_a_document_clause_list_is_blocked_not_assumed_fine():
+    result, audit = screen([internal("Internal: Clause 3.1 vs Clause 11.2", Layer.CONSISTENCY)], document=None)
+    assert reason_of(result) is BlockReason.NO_DOCUMENT_CONTEXT and len(audit.rows) == 1
+
+
+def test_statutory_citations_do_not_need_a_document_context():
+    result, _ = screen([make("Indian Contract Act, 1872, s. 27")], document=None)
+    assert len(result.passed) == 1
+
+
+# ---- the one exemption: lawyer-added findings, by origin ----------------------------------------------
+
+def advocate_finding(**kw):
+    # A lawyer-added finding has no layer and no agent citation, so the full model cannot build one yet
+    # (the lawyer-added read model is a separate task); model_construct stands in for it.
+    return Finding.model_construct(origin=FindingOrigin.ADVOCATE, severity=Severity.HIGH,
+                                   description="added by the advocate", **kw)
+
+
+def test_advocate_origin_finding_is_exempt_by_rule_and_logs_nothing():
+    f = advocate_finding()
+    result, audit = screen([f])
+    assert [p.finding for p in result.passed] == [f] and not result.blocked and audit.rows == []
+    assert gate.GATE_EXEMPT_ORIGINS == frozenset({FindingOrigin.ADVOCATE})
+
+
+def test_an_agent_finding_with_no_layer_is_never_exempt():
+    f = Finding.model_construct(origin=FindingOrigin.AGENT, severity=Severity.HIGH, description="d",
+                                citation="Indian Contract Act, 1872, s. 27", citation_type=CitationType.STATUTORY)
+    result, audit = screen([f])
+    assert reason_of(result) is BlockReason.MALFORMED and len(audit.rows) == 1
+
+
+def test_an_agent_finding_with_no_layer_and_no_citation_is_blocked_too():
+    result, _ = screen([Finding.model_construct(severity=Severity.HIGH, description="d")])
+    assert reason_of(result) is BlockReason.MALFORMED
+
+
+def test_origin_defaults_to_agent_so_agent_output_is_always_gated():
+    assert make("Indian Contract Act, 1872, s. 27").origin is FindingOrigin.AGENT
+
+
+def test_an_advocate_origin_finding_that_carries_agent_fields_is_blocked_as_inconsistent():
+    # Agent output cannot talk its way past the gate by claiming origin=advocate.
+    f = make("Fake Act, 2000, s. 1", origin=FindingOrigin.ADVOCATE)
+    result, audit = screen([f])
+    assert reason_of(result) is BlockReason.MALFORMED and len(audit.rows) == 1

@@ -6,9 +6,16 @@ lawyer verifies the rulebook (see the build plan, "On hold until the lawyer veri
 """
 import re
 
+from app.agents.citation_gate import DocumentContext
 from app.schemas.finding import CitationType, Finding, Layer, Severity
 
 STUB_TAG = "[STUB] "
+
+
+def sample_document_context() -> DocumentContext:
+    """STUB: the clause numbers the fixture findings point at. No parsed-clause source exists yet, so the
+    stub review has to say which clauses its NDA has; the real review gets them from the parsed document."""
+    return DocumentContext("nda", frozenset({"2", "3.1", "6", "8", "9.2", "11.2"}))
 
 
 def sample_findings() -> list[Finding]:

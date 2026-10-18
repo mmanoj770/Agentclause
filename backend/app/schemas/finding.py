@@ -45,6 +45,17 @@ class CitationType(str, Enum):
     INTERNAL_BASELINE = "INTERNAL_BASELINE"
 
 
+class FindingOrigin(str, Enum):
+    """Who produced the finding. Set by server code, never read from agent output.
+
+    AGENT findings go through the Layer 5 citation gate. ADVOCATE (lawyer-added) findings have no
+    layer and no agent citation and are exempt from it; that exemption is the explicit rule in
+    `citation_gate.check_finding`, not a side effect of a null citation.
+    """
+    AGENT = "agent"
+    ADVOCATE = "advocate"
+
+
 class FindingStatus(str, Enum):
     """Review status. `findings.status` is generated from `advocate_action` (PENDING is null there)."""
     PENDING = "pending"
@@ -101,6 +112,11 @@ class Finding(BaseModel):
     citation_type: CitationType = Field(
         description="What kind of source `citation` names: STATUTORY, CASE, CORPUS or INTERNAL_BASELINE. "
                     "Stored as `findings.citation_type`; checked by the Layer 5 gate before any insert.",
+    )
+    origin: FindingOrigin = Field(
+        default=FindingOrigin.AGENT, exclude=True,
+        description="Who produced the finding. Not a table column (derived from `advocate_action = 'add'`). "
+                    "Set by server code; the gate treats anything an agent returns as AGENT-origin.",
     )
     status: FindingStatus = Field(
         default=FindingStatus.PENDING,

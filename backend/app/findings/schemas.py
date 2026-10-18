@@ -1,6 +1,8 @@
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict, Field
 
 Severity = Literal["low", "medium", "high", "critical"]
 
@@ -27,3 +29,23 @@ class LawyerFindingIn(BaseModel):
 class AdjudicateIn(BaseModel):
     action: Literal["confirm", "override"]
     notes: str | None = None
+
+
+class ClientFindingOut(BaseModel):
+    """What a startup user may see of a finding, only after lawyer sign-off.
+
+    An allowlist: `layer`, `rule_applied`, `advocate_notes` and who adjudicated are not fields here, so
+    they cannot reach the response even if a row carries them. `origin` is derived from the lawyer's
+    action ('add' = lawyer-added), never read from the row's content.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    finding_id: UUID
+    severity: Severity
+    clause_reference: str | None = None
+    description: str
+    remedy_suggested: str | None = None
+    citation: str | None = None
+    citation_type: str | None = None
+    status: Literal["confirmed", "added"]
+    origin: Literal["agent", "advocate"]

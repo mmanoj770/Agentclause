@@ -4,7 +4,8 @@ from app.audit import write_audit
 from app.auth.dependencies import CurrentUser
 from app.documents.service import get_document
 from app.agents.citation_gate import PassedFinding
-from app.findings.schemas import AdjudicateIn, LawyerFindingIn
+from app.documents.states import DocState
+from app.findings.schemas import AdjudicateIn, ClientFindingOut, LawyerFindingIn
 from app.schemas.finding import INSERT_COLUMNS, FindingOrigin
 
 
@@ -104,3 +105,39 @@ def add_finding(conn, user: CurrentUser, doc_id, body: LawyerFindingIn) -> dict:
         write_audit(conn, document_id=doc_id, actor_id=user.id, actor_role=user.role,
                     action="finding_added", details={"finding_id": str(created["id"])})
     return created
+
+
+# What a client may see: lawyer-confirmed agent findings and lawyer-added ones. Pending and overridden
+# findings are never shown. Checked here as well as in the query, so a changed query cannot widen it.
+_CLIENT_VISIBLE = {"confirm": ("confirmed", "agent"), "add": ("added", "advocate")}
+_CLIENT_VISIBLE_STATES = (DocState.LAWYER_APPROVED.value, DocState.DELIVERED.value)
+
+
+def list_client_findings(conn, user: CurrentUser, doc_id) -> list[ClientFindingOut]:
+    doc = get_document(conn, doc_id, user)  # first: org-scoped, 404 for anyone else (no state leak)
+    if doc["state"] not in _CLIENT_VISIBLE_STATES:
+        raise HTTPException(409, "Findings are available once a lawyer has signed off the document")
+    # Columns are listed on purpose: layer, rule_applied and advocate_notes are never selected.
+    rows = conn.execute(
+        """select f.id, f.severity, f.clause_reference, f.description, f.remedy_suggested,
+                  f.citation, f.citation_type, f.advocate_action
+           from findings f
+           join document_versions v on v.id = f.document_version_id
+           where f.document_id = %s
+             and v.version_no = (select max(version_no) from document_versions where document_id = %s)
+             and f.advocate_action in ('confirm', 'add')
+           order by array_position(array['critical','high','medium','low'], f.severity),
+                    f.created_at""",
+        (doc_id, doc_id),
+    ).fetchall()
+    out = []
+    for r in rows:
+        visible = _CLIENT_VISIBLE.get(r["advocate_action"])
+        if visible is None:
+            continue
+        status, origin = visible
+        out.append(ClientFindingOut(
+            finding_id=r["id"], severity=r["severity"], clause_reference=r["clause_reference"],
+            description=r["description"], remedy_suggested=r["remedy_suggested"],
+            citation=r["citation"], citation_type=r["citation_type"], status=status, origin=origin))
+    return out

@@ -5,10 +5,11 @@ from fastapi import APIRouter, Depends, Query
 from app.auth.dependencies import CurrentUser, require_role
 from app.db import get_conn
 from app.findings import service
-from app.findings.schemas import AdjudicateIn, LawyerFindingIn, Severity
+from app.findings.schemas import AdjudicateIn, ClientFindingOut, LawyerFindingIn, Severity
 
 router = APIRouter(tags=["findings"])
 lawyer_only = require_role("lawyer")
+startup_only = require_role("startup_user")
 
 
 @router.get("/documents/{doc_id}/findings")
@@ -28,3 +29,8 @@ def adjudicate(finding_id: UUID, body: AdjudicateIn,
 def add_finding(doc_id: UUID, body: LawyerFindingIn,
                 user: CurrentUser = Depends(lawyer_only), conn=Depends(get_conn)):
     return service.add_finding(conn, user, doc_id, body)
+
+
+@router.get("/documents/{doc_id}/client-findings", response_model=list[ClientFindingOut])
+def list_client_findings(doc_id: UUID, user: CurrentUser = Depends(startup_only), conn=Depends(get_conn)):
+    return service.list_client_findings(conn, user, doc_id)

@@ -5,7 +5,8 @@ from app.auth.dependencies import CurrentUser
 from app.documents.service import get_document
 from app.agents.citation_gate import PassedFinding
 from app.documents.states import DocState
-from app.findings.schemas import AdjudicateIn, ClientFindingOut, LawyerFindingIn
+from app.findings.schemas import (AdjudicateIn, ClientFindingOut, LawyerFindingIn,
+                                  lawyer_finding_out)
 from app.schemas.finding import INSERT_COLUMNS, FindingOrigin
 
 
@@ -34,9 +35,13 @@ def insert_agent_findings(conn, document_id, version_id, passed: list[PassedFind
 
 
 def list_findings(conn, user: CurrentUser, doc_id, layer: int | None, severity: str | None):
+    """The lawyer's merged list for the latest version: agent findings and lawyer-added ones, each
+    tagged by `origin` (derived from the lawyer's action, not from content)."""
     get_document(conn, doc_id, user)  # 404 unless this lawyer is assigned to the document
-    return conn.execute(
-        """select f.*, v.version_no
+    rows = conn.execute(
+        """select f.id, f.layer, f.severity, f.clause_reference, f.description, f.rule_applied,
+                  f.remedy_suggested, f.citation, f.citation_type, f.advocate_action, f.advocate_notes,
+                  f.adjudicated_at, f.status, v.version_no
            from findings f
            join document_versions v on v.id = f.document_version_id
            where f.document_id = %s
@@ -47,6 +52,7 @@ def list_findings(conn, user: CurrentUser, doc_id, layer: int | None, severity: 
                     f.layer nulls last, f.created_at""",
         (doc_id, doc_id, layer, layer, severity, severity),
     ).fetchall()
+    return [lawyer_finding_out(r) for r in rows]
 
 
 def adjudicate(conn, user: CurrentUser, finding_id, body: AdjudicateIn) -> dict:
@@ -61,6 +67,10 @@ def adjudicate(conn, user: CurrentUser, finding_id, body: AdjudicateIn) -> dict:
             raise HTTPException(404, "Finding not found")
         if row["doc_state"] != "pending_lawyer_review":
             raise HTTPException(409, "Findings can only be adjudicated while the document is in review")
+        if row["advocate_action"] == "add":
+            # A lawyer-added finding is already the lawyer's own decision. Adjudicating it would
+            # overwrite 'add' and turn it into an agent finding with no layer or citation.
+            raise HTTPException(409, "A finding you added is already your decision")
         if body.action == "override" and not (body.notes and body.notes.strip()):
             raise HTTPException(422, "An override needs a reason in notes")
 
@@ -74,7 +84,7 @@ def adjudicate(conn, user: CurrentUser, finding_id, body: AdjudicateIn) -> dict:
                     action="finding_adjudicated",
                     details={"finding_id": str(finding_id), "action": body.action,
                              "before": row["advocate_action"], "notes": body.notes})
-    return updated
+    return lawyer_finding_out(updated)
 
 
 def add_finding(conn, user: CurrentUser, doc_id, body: LawyerFindingIn) -> dict:
@@ -104,7 +114,7 @@ def add_finding(conn, user: CurrentUser, doc_id, body: LawyerFindingIn) -> dict:
         ).fetchone()
         write_audit(conn, document_id=doc_id, actor_id=user.id, actor_role=user.role,
                     action="finding_added", details={"finding_id": str(created["id"])})
-    return created
+    return lawyer_finding_out(created)
 
 
 # What a client may see: lawyer-confirmed agent findings and lawyer-added ones. Pending and overridden

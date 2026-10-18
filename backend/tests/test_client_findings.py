@@ -12,7 +12,7 @@ ORG_A, ORG_B = str(uuid.uuid4()), str(uuid.uuid4())
 DOC = str(uuid.uuid4())
 LAWYER = str(uuid.uuid4())
 URL = f"/documents/{DOC}/client-findings"
-ALLOWED_KEYS = {"finding_id", "severity", "clause_reference", "description", "remedy_suggested",
+ALLOWED_KEYS = {"finding_id", "id", "severity", "clause_reference", "description", "remedy_suggested",
                 "citation", "citation_type", "status", "origin"}
 
 

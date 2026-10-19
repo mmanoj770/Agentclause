@@ -95,7 +95,8 @@ def make_s3():
     client = boto3.client(
         "s3", region_name="ap-south-1",
         endpoint_url="https://s3.ap-south-1.amazonaws.com",
-        aws_access_key_id="AKIATESTTESTTESTTEST", aws_secret_access_key=SECRET,
+        # Fake value for the botocore Stubber; not a real AWS key.
+        aws_access_key_id="AKIAFAKEFAKEFAKEFAKE", aws_secret_access_key=SECRET,
         config=Config(signature_version="s3v4"),
     )
     return client, Stubber(client)

@@ -13,6 +13,9 @@ DEFAULT_GEMINI_MODEL = "gemini-flash-latest"
 class LLMClient(Protocol):
     def complete(self, system: str, user: str, max_tokens: int = 1000) -> str: ...
 
+class QuotaExhaustedError(RuntimeError):
+    pass
+
 
 class AnthropicClient:
     def __init__(self, model: str | None = None, api_key: str | None = None):
@@ -59,12 +62,15 @@ class GeminiClient:
                 )
                 return response.text or ""
             except Exception as exc:
-                rate_limited = "429" in str(exc) or "RESOURCE_EXHAUSTED" in str(exc)
+                message = str(exc)
+                if "PerDay" in message:
+                    raise QuotaExhaustedError(
+                        "Daily free quota used up for this model. Wait, or set a different GEMINI_MODEL."
+                    ) from exc
+                rate_limited = "429" in message or "RESOURCE_EXHAUSTED" in message
                 if not rate_limited or attempt == 3:
                     raise
                 time.sleep(10 * (attempt + 1))
-        return ""
-
 
 def get_llm_client() -> LLMClient:
     provider = os.environ.get("LLM_PROVIDER", "gemini").lower()

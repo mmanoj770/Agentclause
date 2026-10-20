@@ -16,9 +16,10 @@ app = FastAPI(title="AgentClause API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.frontend_origin],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=settings.cors_origins,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
+    allow_credentials=False,
 )
 
 @app.get("/health")
@@ -32,3 +33,7 @@ from app.lawyer_queue.router import router as queue_router
 app.include_router(queue_router)
 from app.findings.router import router as findings_router
 app.include_router(findings_router)
+from app.storage.router import router as storage_router
+app.include_router(storage_router)
+from app.agents.router import router as agents_router
+app.include_router(agents_router)

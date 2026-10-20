@@ -31,7 +31,7 @@ def _can_view(doc: dict, actor: Actor) -> bool:
 
 def create_document(conn, user: CurrentUser, doc_type: str,
                     state_of_execution: str | None, transaction_value: Decimal | None) -> dict:
-    if user.org_id is None:
+    if not user.org_id:
         raise HTTPException(400, "Your account is not linked to an organization yet")
     with conn.transaction():
         ct = conn.execute(
@@ -53,7 +53,7 @@ def create_document(conn, user: CurrentUser, doc_type: str,
 
 def list_documents(conn, user: CurrentUser) -> list[dict]:
     if user.role == STARTUP:
-        if user.org_id is None:
+        if not user.org_id:
             return []
         return conn.execute(
             "select * from documents where org_id = %s order by created_at desc", (user.org_id,)

@@ -7,6 +7,11 @@ from jwt import PyJWKClient
 from app.config import settings
 
 bearer = HTTPBearer(auto_error=False)
+
+# Supabase stamps `iat` with its own clock. A server or laptop whose clock runs a moment behind would reject a
+# freshly issued token as "not yet valid". A few seconds of leeway absorbs that normal drift; it is not a
+# way to accept old tokens (exp still applies, at most this many seconds late).
+CLOCK_SKEW_LEEWAY_SECONDS = 10
 _jwks = PyJWKClient(f"{settings.supabase_url}/auth/v1/.well-known/jwks.json")
 
 @dataclass
@@ -31,7 +36,8 @@ def _decode(token: str) -> dict:
         else:
             raise _unauthorized()
         
-        return jwt.decode(token, key, algorithms=algorithms, audience="authenticated")
+        return jwt.decode(token, key, algorithms=algorithms, audience="authenticated",
+                          leeway=CLOCK_SKEW_LEEWAY_SECONDS)
     except jwt.PyJWTError:
         raise _unauthorized()
 
@@ -51,7 +57,7 @@ def get_current_user(
         id=claims["sub"],
         email=claims.get("email"),
         role=role,
-        org_id=claims.get("org_id"),
+        org_id=claims.get("org_id") or None,  # an empty claim means no org, never a blank id
     )
 
 def require_role(*allowed: str):

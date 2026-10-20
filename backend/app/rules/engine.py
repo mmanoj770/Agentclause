@@ -75,4 +75,5 @@ class RuleEvaluator:
             rule_applied=rule.rule_id,
             remedy_suggested=rule.remedy_suggested,
             citation=rule.citation,
+            citation_type=rule.citation_type,
         )

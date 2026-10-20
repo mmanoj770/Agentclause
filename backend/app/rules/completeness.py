@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from app.rules.clauses import CLAUSES, normalise
 from app.rules.engine import finding_severity
 from app.rules.schema import VerificationStatus
-from app.schemas.finding import Finding, Layer, Severity
+from app.schemas.finding import CitationType, Finding, Layer, Severity
 
 CONFIG_DIR = Path(__file__).parent / "config"
 
@@ -64,5 +64,6 @@ class CompletenessChecker:
                 rule_applied=rule_id_for(self.contract_type, req.clause),
                 remedy_suggested=f"Add a {clause.label.lower()} clause.",
                 citation=f"Internal: {self.contract_type.upper()} completeness baseline, {clause.label}",
+                citation_type=CitationType.INTERNAL_BASELINE,
             ))
         return findings

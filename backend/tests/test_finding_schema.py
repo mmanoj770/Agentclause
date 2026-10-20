@@ -95,3 +95,16 @@ def test_citation_type_values_fixed():
         "STATUTORY": "STATUTORY", "CASE": "CASE", "CORPUS": "CORPUS",
         "INTERNAL_BASELINE": "INTERNAL_BASELINE",
     }
+
+
+@pytest.mark.parametrize("change", [
+    {"citation_type": "statute"},                                           # not a value the table accepts
+])
+def test_citation_type_must_fit_citation(change):
+    with pytest.raises(ValidationError):
+        Finding.model_validate({**load_example(), **change})
+
+
+def test_insert_row_carries_citation_type():
+    row = Finding.model_validate(load_example()).to_insert_row(uuid4(), uuid4())
+    assert row["citation_type"] == "STATUTORY"

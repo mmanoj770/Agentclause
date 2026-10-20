@@ -39,3 +39,5 @@ from app.agents.router import router as agents_router
 app.include_router(agents_router)
 from app.intake.router import router as intake_router
 app.include_router(intake_router)
+from app.rules.api import router as reviews_router
+app.include_router(reviews_router)

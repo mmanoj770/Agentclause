@@ -7,5 +7,6 @@
   "rule_applied": "NDA_GOVERNING_LAW_MISSING",
   "remedy_suggested": "Add a clause: \"This Agreement is governed by the laws of India. The courts at Bengaluru, Karnataka have exclusive jurisdiction over any dispute arising out of or in connection with it.\"",
   "citation": "Code of Civil Procedure, 1908, s. 20; Indian Contract Act, 1872, s. 28 (Exception 1)",
+  "citation_type": "STATUTORY",
   "status": "pending"
 }

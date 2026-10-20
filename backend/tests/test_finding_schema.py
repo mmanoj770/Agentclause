@@ -77,10 +77,25 @@ def test_invalid_findings_rejected(change):
 
 @pytest.mark.parametrize("field", [
     "layer", "severity", "clause_reference", "description",
-    "rule_applied", "remedy_suggested", "citation",
+    "rule_applied", "remedy_suggested", "citation", "citation_type",
 ])
 def test_required_fields(field):
     data = load_example()
     del data[field]
     with pytest.raises(ValidationError):
         Finding.model_validate(data)
+
+
+@pytest.mark.parametrize("change", [
+    {"citation_type": "statute"},                                           # not a value the table accepts
+    {"citation_type": "INTERNAL_BASELINE"},                                 # statute citation labelled internal
+    {"citation": "Internal: NDA baseline", "citation_type": "STATUTORY"},  # internal citation labelled statute
+])
+def test_citation_type_must_fit_citation(change):
+    with pytest.raises(ValidationError):
+        Finding.model_validate({**load_example(), **change})
+
+
+def test_insert_row_carries_citation_type():
+    row = Finding.model_validate(load_example()).to_insert_row(uuid4(), uuid4())
+    assert row["citation_type"] == "STATUTORY"

@@ -13,7 +13,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from app.rules.clauses import CLAUSES
-from app.schemas.finding import Severity
+from app.schemas.finding import CitationType, Severity
 
 INTERNAL = "Internal"
 # Matches migration 18's STATUTORY backfill pattern once rendered: "<Act>, <year>, s. <n>".
@@ -109,6 +109,10 @@ class Rule(BaseModel):
         if self.statute == INTERNAL:
             return f"Internal: {self.section}"
         return f"{self.statute}, s. {self.section}"
+
+    @property
+    def citation_type(self) -> CitationType:
+        return CitationType.INTERNAL_BASELINE if self.statute == INTERNAL else CitationType.STATUTORY
 
     @property
     def verified(self) -> bool:

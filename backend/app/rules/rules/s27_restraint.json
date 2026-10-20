@@ -1,0 +1,12 @@
+{
+  "rule_id": "ICA_S27_RESTRAINT_OF_TRADE",
+  "statute": "Indian Contract Act, 1872",
+  "section": "27",
+  "applies_to": ["nda", "employment_contract", "consultant_freelancer", "non_compete_non_solicit"],
+  "condition": "contains_text('non-compete', 'non compete', 'restraint of trade', 'shall not engage in any business', 'shall not carry on any business')",
+  "severity": "critical",
+  "description": "The contract restrains a party from carrying on a business or trade. Under s.27 such a restraint is void unless it falls within the sale-of-goodwill exception.",
+  "remedy_suggested": "Remove the restraint, or narrow it to non-solicitation and non-use of Confidential Information, which s.27 does not void.",
+  "effective_from": "2024-01-01",
+  "verification_status": "unverified"
+}

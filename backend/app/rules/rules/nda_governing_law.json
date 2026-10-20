@@ -1,0 +1,12 @@
+{
+  "rule_id": "NDA_GOVERNING_LAW_MISSING",
+  "statute": "Internal",
+  "section": "NDA baseline, governing law",
+  "applies_to": ["nda"],
+  "condition": "missing_clause('governing-law')",
+  "severity": "high",
+  "description": "The NDA does not say which law governs it or which courts hear disputes, so enforcing it starts with a fight over forum and law.",
+  "remedy_suggested": "Add a clause: this Agreement is governed by the laws of India, and the courts at [city] have exclusive jurisdiction.",
+  "effective_from": "2024-01-01",
+  "verification_status": "unverified"
+}

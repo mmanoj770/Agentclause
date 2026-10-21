@@ -128,9 +128,9 @@
     "favoured_party": "neutral",
     "statute_refs": [],
     "title": "Notices [PLACEHOLDER]",
-    "content": "All notices under this Agreement shall be in writing and sent to the addresses of the parties set out above, or to such other address as a party may notify in writing. A notice sent by registered post shall be deemed received [Notice Days] after dispatch.",
+    "content": "All notices under this Agreement shall be in writing. Notices to [Party A] shall be sent to its registered office and notices to [Party B] to its registered office, or to such other address as a party may notify in writing. A notice sent by registered post shall be deemed received [Notice Days] after dispatch.",
     "verification_status": "staging",
-    "notes": "PLACEHOLDER - deemed-receipt period to be confirmed. Requires lawyer verification."
+    "notes": "PLACEHOLDER - party names and deemed-receipt period are deal facts. Requires lawyer verification."
   },
   {
     "clause_type": "dispute_resolution",

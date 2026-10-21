@@ -106,10 +106,19 @@ Rules:
 - Keep generic references such as "each party", "either party", "the other party" unchanged.
 - Never add, remove or change obligations, conditions, negations, liability, or
   statute references. Never invent values that are not in the facts.
+- A placeholder such as [Party A] may only take a "party_a_..." fact, and [Party B]
+  only a "party_b_..." fact. Never swap the parties.
 - If no fact clearly belongs anywhere, return no edits. Doing nothing is always safe.
 
 Return JSON only, in this exact shape:
-{"edits": [{"find": "...", "replace": "...", "fact": "..."}]}"""
+{"edits": [{"find": "...", "replace": "...", "fact": "..."}]}
+
+Example (the values below are made up; use only the facts you are given).
+Clause: "Notices to [Party A] shall be sent to its office. Payment is due within 45 days."
+Facts: {"party_a_name": "Acme Ltd", "payment_period": "30 days"}
+Answer: {"edits": [
+  {"find": "[Party A]", "replace": "Acme Ltd", "fact": "party_a_name"},
+  {"find": "within 45 days", "replace": "within 30 days", "fact": "payment_period"}]}"""
 
 
 class AdaptationStatus(StrEnum):
@@ -193,8 +202,12 @@ def _fact_for_change(removed: list[str], inserted: list[str], facts: dict[str, s
     if not all(_removable(t) for t in removed):
         return None  # legal wording was removed
     ins = [t.casefold() for t in inserted]
-    for key, value in facts.items():
-        if _is_sublist(ins, [t.casefold() for t in _diff_tokens(value)]):
+    tokens = {key: [t.casefold() for t in _diff_tokens(value)] for key, value in facts.items()}
+    for key, toks in tokens.items():          # an exact match names the fact precisely
+        if ins == toks:
+            return key
+    for key, toks in tokens.items():          # otherwise part of a fact (e.g. a short form)
+        if _is_sublist(ins, toks):
             return key
     return None
 
@@ -220,6 +233,20 @@ def diff_against_source(source: str, adapted: str, facts: dict[str, str]) -> lis
             fact=_fact_for_change(a[i1:i2], b[j1:j2], facts),
         ))
     return changes
+
+
+PARTY_SLOT_RE = re.compile(r"\bparty[\s_-]*([ab])\b", re.IGNORECASE)
+
+
+def _party_slot_mismatch(find: str, fact: str) -> str | None:
+    """A [Party A] slot may only take party A facts, and [Party B] only party B facts."""
+    for placeholder in PLACEHOLDER_RE.findall(find):
+        for side in PARTY_SLOT_RE.findall(placeholder):
+            wanted = f"party_{side.lower()}_"
+            if not fact.startswith(wanted):
+                return (f"placeholder {placeholder} is for party {side.upper()}, "
+                        f"but fact '{fact}' belongs to the other party")
+    return None
 
 
 def _check_edit(raw, original: str, facts: dict[str, str], xref_spans) -> tuple[Edit, int] | str:
@@ -248,6 +275,9 @@ def _check_edit(raw, original: str, facts: dict[str, str], xref_spans) -> tuple[
 
     if fact not in facts:
         return f"unknown fact '{fact}'"
+    slot_problem = _party_slot_mismatch(find, fact)
+    if slot_problem:
+        return slot_problem
     value = facts[fact]
     norm_replace, norm_value = _norm(replace), _norm(value)
     if norm_value not in norm_replace:
@@ -346,8 +376,11 @@ def adapt_clause(
 
     if rejected:
         warnings.append(f"{len(rejected)} proposed edit(s) rejected by safety checks.")
-    if accepted:
+    if accepted and content != original:
         status = AdaptationStatus.adapted
+    elif accepted:
+        accepted = []  # the edits changed nothing
+        status = AdaptationStatus.unchanged
     elif rejected:
         status = AdaptationStatus.fallback_original
         warnings.append("No proposed edit passed the safety checks; original clause kept.")

@@ -154,3 +154,60 @@ def test_allowed_facts():
     assert f["effective_date"] == "1 November 2026"
     assert f["notice_period"] == "60 days"
     assert isinstance(deal(), DealFacts)
+
+
+# ---------------- party names (lead: "party names" are facts to substitute) ----------------
+
+PARTY_CLAUSE = ("Notices to [Party A] shall be sent to its registered office, "
+                "and notices to [Party B] to its registered office.")
+
+
+def _party_deal():
+    return deal(party_a={"name": "Quenta Technologies Pvt. Ltd.", "short_name": "Quenta"},
+                party_b={"name": "Shree Packaging Works & Sons LLP"})
+
+
+def test_party_names_substituted_and_labelled():
+    clause = retrieved("confidentiality", content=PARTY_CLAUSE)
+    r = adapt_clause(clause, _party_deal(), llm=llm_returning(
+        {"find": "[Party A]", "replace": "Quenta Technologies Pvt. Ltd.", "fact": "party_a_name"},
+        {"find": "[Party B]", "replace": "Shree Packaging Works & Sons LLP", "fact": "party_b_name"}))
+    assert r.status == AdaptationStatus.adapted and r.diff_only_facts
+    assert r.content.startswith("Notices to Quenta Technologies Pvt. Ltd. shall be sent")
+    assert "notices to Shree Packaging Works & Sons LLP to its" in r.content
+    assert [(c.removed, c.fact) for c in r.diff] == [("[Party A]", "party_a_name"), ("[Party B]", "party_b_name")]
+
+
+def test_short_name_is_labelled_as_the_short_name():
+    clause = retrieved("confidentiality", content=PARTY_CLAUSE)
+    r = adapt_clause(clause, _party_deal(), llm=llm_returning(
+        {"find": "[Party A]", "replace": "Quenta", "fact": "party_a_short_name"}))
+    assert r.diff[0].fact == "party_a_short_name"
+
+
+@pytest.mark.parametrize("find, replace, fact", [
+    ("[Party A]", "Shree Packaging Works & Sons LLP", "party_b_name"),   # parties swapped
+    ("[Party B]", "Quenta Technologies Pvt. Ltd.", "party_a_name"),      # parties swapped
+    ("[Party A]", "Quenta", "party_b_short_name"),                       # wrong party, unknown fact
+])
+def test_wrong_party_in_a_party_slot_rejected(find, replace, fact):
+    clause = retrieved("confidentiality", content=PARTY_CLAUSE)
+    d = deal(party_a={"name": "Quenta Technologies Pvt. Ltd.", "short_name": "Quenta"},
+             party_b={"name": "Shree Packaging Works & Sons LLP", "short_name": "Shree"})
+    r = adapt_clause(clause, d, llm=llm_returning({"find": find, "replace": replace, "fact": fact}))
+    assert r.content == clause.content and r.status == AdaptationStatus.fallback_original
+    assert r.edits_rejected
+
+
+def test_edit_that_changes_nothing_is_unchanged_not_adapted():
+    clause = retrieved("termination_for_convenience")
+    d = deal(terms={"notice_period": "30 days"})
+    r = adapt_clause(clause, d, llm=llm_returning({"find": "30 days", "replace": "30 days", "fact": "notice_period"}))
+    assert r.status == AdaptationStatus.unchanged and r.edits_applied == [] and r.content == clause.content
+
+
+def test_prompt_has_a_worked_example_and_the_party_rule():
+    seen = {}
+    adapt_clause(retrieved("payment_terms"), deal(),
+                 llm=lambda p, *, system: seen.update(system=system) or {"edits": []})
+    assert "Never swap the parties" in seen["system"] and "Example" in seen["system"]

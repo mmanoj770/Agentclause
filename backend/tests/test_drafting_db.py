@@ -214,3 +214,42 @@ def test_api_failure_falls_back_to_filters(seeded):
 def test_bad_arguments(conn, args, kwargs):
     with pytest.raises(ValueError):
         retrieve_clauses(conn, *args, **kwargs)
+
+
+def test_guard_rechecks_database_before_lawyer_output(seeded):
+    from drafting_fixtures import deal, llm_returning
+    from app.drafting.adaptation import adapt_clause
+    from app.drafting.assembly import assemble_document
+    from app.drafting.guard import render_for
+
+    seeded.execute("UPDATE clauses SET verification_status = 'verified', verified_by = 'Adv. Test'")
+    r = retrieve_clauses(seeded, None, "nda", verified_only=True, k=50)
+    clauses = [adapt_clause(c, deal(), llm=llm_returning(
+        {"find": "[City]", "replace": "Bengaluru", "fact": "jurisdiction_city"})) for c in r.clauses]
+    doc = assemble_document("Non-Disclosure Agreement", deal(), clauses)
+    ok = render_for(doc, "lawyer", conn=seeded)
+    assert ok.allowed and "courts at Bengaluru, India" in ok.text
+
+    # A clause demoted after retrieval must block lawyer output.
+    seeded.execute("UPDATE clauses SET verification_status = 'staging' WHERE clause_type = 'indemnity'")
+    blocked = render_for(doc, "lawyer", conn=seeded)
+    assert not blocked.allowed and [b.clause_type for b in blocked.blocked] == ["indemnity"]
+    # And one deleted from the corpus too.
+    seeded.execute("DELETE FROM clauses WHERE clause_type = 'indemnity'")
+    assert "no longer exists" in render_for(doc, "lawyer", conn=seeded).blocked[0].reason
+
+
+def test_guard_blocks_a_verified_clause_edited_after_drafting(seeded):
+    from drafting_fixtures import deal, llm_returning
+    from app.drafting.adaptation import adapt_clause
+    from app.drafting.assembly import assemble_document
+    from app.drafting.guard import render_for
+
+    seeded.execute("UPDATE clauses SET verification_status = 'verified', verified_by = 'Adv. Test'")
+    c = retrieve_clauses(seeded, "confidentiality", "nda", verified_only=True).clauses[0]
+    doc = assemble_document("NDA", deal(), [adapt_clause(c, deal(), llm=llm_returning())])
+    assert render_for(doc, "lawyer", conn=seeded).allowed
+
+    seeded.execute("UPDATE clauses SET content = content || ' Extra obligation.' WHERE clause_type = 'confidentiality'")
+    r = render_for(doc, "lawyer", conn=seeded)
+    assert not r.allowed and "text changed" in r.blocked[0].reason

@@ -25,6 +25,9 @@ REFUSAL_TEXT: dict[ReasonCode, str] = {
     ReasonCode.DOCUMENT_NOT_READY: (
         "This document isn't ready for questions yet. Chat opens once your advocate has signed it off."
     ),
+    ReasonCode.TEMPORARILY_UNAVAILABLE: (
+        "I couldn't process your question just now. Please try again in a moment."
+    ),
 }
 
 ESCALATION_RECORDED_TEXT = (

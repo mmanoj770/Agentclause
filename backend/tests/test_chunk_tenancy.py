@@ -75,8 +75,9 @@ def test_cross_org_blocked():
     assert_not_found(startup(ORG_B), DOC_A, VER_A)
 
 
-def test_null_org_blocked():
-    assert_not_found(startup(None), DOC_A, VER_A)
+@pytest.mark.parametrize("org_id", [None, ""])
+def test_null_or_empty_org_blocked(org_id):
+    assert_not_found(startup(org_id), DOC_A, VER_A)
 
 
 def test_unassigned_lawyer_blocked():

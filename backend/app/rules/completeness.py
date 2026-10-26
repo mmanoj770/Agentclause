@@ -48,13 +48,15 @@ class CompletenessChecker:
     def contract_type(self) -> str:
         return self.config.contract_type
 
-    def check(self, text: str) -> list[Finding]:
+    def check(self, text: str, found: frozenset[str] | set[str] = frozenset()) -> list[Finding]:
+        """found: clause ids intake (R2) located in the text. Such a clause counts as present even when
+        the keyword patterns miss its wording; intake only reports clauses whose text it quoted verbatim."""
         normalised = normalise(text)
         verified = self.config.verification_status is VerificationStatus.VERIFIED
         findings = []
         for req in self.config.required:
             clause = CLAUSES[req.clause]
-            if clause.present_in(normalised):
+            if req.clause in found or clause.present_in(normalised):
                 continue
             findings.append(Finding(
                 layer=Layer.COMPLETENESS,

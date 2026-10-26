@@ -10,6 +10,7 @@ from app.rules.completeness import CompletenessChecker
 from app.rules.engine import RuleEvaluator
 from app.rules.schema import Rule, RuleLoader
 from app.schemas.finding import Finding, Severity
+from app.schemas.normalized_document import NormalizedDocument
 
 RULES_DIR = Path(__file__).parent / "rules"
 _SEVERITY_ORDER = {Severity.CRITICAL: 0, Severity.HIGH: 1, Severity.MEDIUM: 2, Severity.LOW: 3}
@@ -26,23 +27,32 @@ def _checkers() -> dict[str, CompletenessChecker]:
     return {nda.contract_type: nda}
 
 
-async def run_review(contract_text: str, contract_type_id: str, *, strict: bool = False) -> list[Finding]:
+async def run_review(contract_text: str, contract_type_id: str, *, strict: bool = False,
+                     found_clauses: frozenset[str] | set[str] = frozenset()) -> list[Finding]:
     """Review normalised contract text and return findings, most severe first.
 
     contract_type_id is a contract_types code, e.g. "nda".
     strict=False (the default, while every rule is unverified) also runs unverified rules; their
     findings are capped at LOW. strict=True runs verified rules only.
+    found_clauses: clause ids intake already located (see run_review_normalized).
     """
     contract_type = contract_type_id.strip().lower()
     rule_findings = RuleEvaluator(list(_rules(strict))).evaluate(contract_text, contract_type)
 
     checker = _checkers().get(contract_type)
     reported = {f.rule_applied for f in rule_findings}
-    completeness = [f for f in (checker.check(contract_text) if checker else [])
+    completeness = [f for f in (checker.check(contract_text, found_clauses) if checker else [])
                     if f.rule_applied not in reported]
 
     return sorted(rule_findings + completeness,
                   key=lambda f: (_SEVERITY_ORDER[f.severity], f.layer, f.rule_applied))
+
+
+async def run_review_normalized(doc: NormalizedDocument, *, strict: bool = False) -> list[Finding]:
+    """run_review() for intake (R2) output: reviews doc.full_text, and the completeness checker also
+    counts the clauses intake found."""
+    return await run_review(doc.full_text, doc.document_type.value, strict=strict,
+                            found_clauses=doc.clause_types())
 
 
 router = APIRouter(prefix="/reviews", tags=["reviews"])

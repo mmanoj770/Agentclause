@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     gemini_embedding_model: str = "gemini-embedding-001"
     gemini_generation_model: str = "gemini-3.5-flash-lite"
+    # Intake normalisation (R2): extraction only, so the cheapest model that follows a JSON schema.
+    gemini_intake_model: str = "gemini-3.5-flash-lite"
 
     # File storage (S3). Credentials come from the standard AWS chain (env vars, profile,
     # role); the three aws_* fields below exist only so they can be set in .env.local.

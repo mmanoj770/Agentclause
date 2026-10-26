@@ -138,9 +138,9 @@ def _strip_code_fences(text: str) -> str:
     return text.strip()
 
 
-def generate_json(prompt: str, *, system: str, timeout: float = 60) -> dict:
-    """Ask the generation model for a JSON object and return it parsed."""
-    model = settings.gemini_generation_model
+def generate_json(prompt: str, *, system: str, timeout: float = 60, model: str | None = None) -> dict:
+    """Ask the generation model (or `model`, a settings value) for a JSON object and return it parsed."""
+    model = model or settings.gemini_generation_model
     body = {
         "systemInstruction": {"parts": [{"text": system}]},
         "contents": [{"role": "user", "parts": [{"text": prompt}]}],

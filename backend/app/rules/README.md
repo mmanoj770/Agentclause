@@ -3,12 +3,15 @@
 ```python
 from app.rules.api import run_review
 
-findings = await run_review(contract_text, "nda")   # list[ReviewFinding], most severe first; strict
+result = await run_review(contract_text, "nda", effective_date=doc.effective_date)   # strict by default
+result.findings          # list[ReviewFinding], most severe first
+result.skipped_rules     # every rule that did not run, and why
+result.evaluation_date   # the date whose rule versions were applied
 ```
 
-Or over HTTP, with a logged-in user's token: `POST /reviews` with `{"contract_text": "...", "contract_type_id": "nda"}`.
+Or over HTTP, with a logged-in user's token: `POST /reviews` with `{"contract_text": "...", "contract_type_id": "nda"}`, plus `"effective_date": "YYYY-MM-DD"` when it is known.
 
-`run_review` runs the version in force today of every rule whose `applies_to` includes the contract type. Pass `on=date(...)` to review as of another date. It also runs the completeness checker for that type (NDA only for now). When a rule and the completeness checker report the same missing clause, only the rule's finding is kept. They share the rule ID, e.g. `NDA_GOVERNING_LAW_MISSING`: the rule finding records `NDA_GOVERNING_LAW_MISSING@1`, the completeness finding `NDA_GOVERNING_LAW_MISSING`.
+`run_review` runs the version in force on the [evaluation date](#evaluation-date) of every rule whose `applies_to` includes the contract type. It also runs the completeness checker for that type (NDA only for now). When a rule and the completeness checker report the same missing clause, only the rule's finding is kept. They share the rule ID, e.g. `NDA_GOVERNING_LAW_MISSING`: the rule finding records `NDA_GOVERNING_LAW_MISSING@1`, the completeness finding `NDA_GOVERNING_LAW_MISSING`.
 
 ## Verification and severity
 
@@ -22,8 +25,13 @@ Every finding `run_review` returns carries `verification_status` from the rule o
 `POST /reviews` (add `?strict=false` for demo mode) returns:
 
 ```json
-{"strict_mode": true, "status": "ok", "notice": null, "findings": [...]}
+{"strict_mode": true, "status": "ok", "notice": null, "evaluation_date": "2026-10-28",
+ "findings": [...],
+ "skipped_rules": {"count": 1, "rules": [{"rule_id": "ICA_S27_RESTRAINT_OF_TRADE", "version": 1,
+                                          "reason": "unverified_in_strict_mode"}]}}
 ```
+
+A date error in the rule files (see [Gaps](#gaps)) is a 500 that names the rule, never a quiet review.
 
 | `status` | When |
 |---|---|
@@ -62,7 +70,7 @@ That's why a statute needs its year and a real section number. A label like "Gen
 A rule never changes in place once it has produced findings: a stored finding must still point to the wording that raised it.
 
 - **To change a rule**, add a new file with the same `rule_id` and the next `version`. Set the old version's `effective_to` to the day before the new version's `effective_from`. Keep the old file.
-- For each `rule_id`, the loader keeps **the version in force on the evaluation date**, which defaults to today (`RuleLoader(..., on=date)`, `run_review(..., on=date)`). A date with no version in force means that rule doesn't run.
+- For each `rule_id`, the loader keeps **the version in force on the [evaluation date](#evaluation-date)**.
 - **Loading fails, naming the file,** when:
   - two versions of one `rule_id` share a day (both ends are inclusive, and an open `effective_to` runs forever);
   - a version number appears twice;
@@ -72,6 +80,39 @@ A rule never changes in place once it has produced findings: a stored finding mu
 - `superseded_by` is a pointer for people. Use it when a rule is replaced by one with a *different* `rule_id`. The loader checks that the target exists, but dates alone decide what runs.
 - Findings record the version as `rule_applied = "<rule_id>@<version>"`. `findings.rule_applied` is a plain text column, so this needs no migration. `base_rule_id()` strips the suffix.
 - The completeness config is not versioned yet. Its findings use the bare ID.
+
+### Evaluation date
+
+Rule versions are picked for one date, in this order:
+
+1. `on=` if the caller passes it (`run_review(..., on=date)`, `RuleLoader(..., on=date)`);
+2. otherwise the contract's effective date if known: pass `effective_date=` (from `NormalizedDocument.effective_date`) to `run_review`, or `"effective_date"` in the `POST /reviews` body;
+3. otherwise **today in India (Asia/Kolkata)**, not the server's clock zone. At 01:30 IST on 28 October a UTC server still says 27 October; the rules use 28 October.
+
+The response's `evaluation_date` says which date was used. The time zone loads when the app starts: a host with no time-zone database fails at startup instead of using the wrong day.
+
+### Gaps
+
+For the evaluation date, each `rule_id` falls in exactly one case:
+
+| Case | Result |
+|---|---|
+| A version is in force | It runs (in strict mode, only if verified) |
+| The date is before the first version's `effective_from` | Skipped as `not_yet_in_force`: the rule didn't exist yet |
+| The date is after the last version's `effective_to` | Skipped as `no_longer_in_force`: the rule was retired |
+| The date is between one version's `effective_to` and the next one's `effective_from` | **`RuleGapError`**, naming the rule, the date and both versions. A gap is a mistake in the files, so the whole review fails rather than run with the rule silently missing |
+
+### Skipped rules
+
+`skipped_rules` lists everything that did not run, as `{rule_id, version, reason}`:
+
+| `reason` | Meaning |
+|---|---|
+| `unverified_in_strict_mode` | The version in force (or the completeness config) is unverified |
+| `not_yet_in_force` / `no_longer_in_force` | See [Gaps](#gaps) |
+| `not_applicable_to_contract_type` | The rule's `applies_to` doesn't include this contract type. This reason wins over the others |
+
+Completeness checks skipped in strict mode have `version: null`, because the completeness config is not versioned. Each review also logs one line with the counts per reason, the contract type, the mode and the date. It never logs contract text.
 
 ## Conditions
 

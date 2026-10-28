@@ -3,7 +3,7 @@ import re
 from datetime import date
 
 from app.rules.clauses import CLAUSES, normalise
-from app.rules.schema import INTERNAL, Rule, parse_condition
+from app.rules.schema import INTERNAL, Rule, parse_condition, today_in_india
 from app.schemas.finding import Finding, Layer, Severity
 
 MAX_CLAUSE_REFERENCE = 200
@@ -30,7 +30,7 @@ class RuleEvaluator:
 
     def __init__(self, rules: list[Rule], today: date | None = None):
         self.rules = rules
-        self.today = today or date.today()
+        self.today = today or today_in_india()
 
     def evaluate(self, text: str, contract_type: str) -> list[Finding]:
         contract_type = contract_type.strip().lower()

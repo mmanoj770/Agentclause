@@ -11,7 +11,7 @@
 | `severity` | `Severity`: `critical`, `high`, `medium`, `low` | `severity` |
 | `clause_reference` | non-empty string | `clause_reference` |
 | `description` | non-empty string | `description` |
-| `rule_applied` | rule ID in `UPPER_SNAKE_CASE` | `rule_applied` |
+| `rule_applied` | rule ID in `UPPER_SNAKE_CASE`, plus `@<version>` for a versioned rule (`ICA_S27_RESTRAINT_OF_TRADE@1`) | `rule_applied` (plain `text`; SQL grouping by rule needs `split_part(rule_applied, '@', 1)`) |
 | `remedy_suggested` | non-empty string | `remedy_suggested` |
 | `citation` | non-empty string | `citation` (the finding_citation_and_status migration) |
 | `citation_type` | `CitationType`: `STATUTORY`, `CASE`, `CORPUS`, `INTERNAL_BASELINE` | `citation_type` (migration 18) |

@@ -56,6 +56,11 @@ class CompletenessChecker:
     def verified(self) -> bool:
         return self.config.verification_status is VerificationStatus.VERIFIED
 
+    @property
+    def rule_ids(self) -> list[str]:
+        """The rule_applied of each required-clause check, in config order."""
+        return [rule_id_for(self.contract_type, req.clause) for req in self.config.required]
+
     def check(self, text: str) -> list[Finding]:
         normalised = normalise(text)
         verified = self.verified

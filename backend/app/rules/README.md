@@ -3,7 +3,7 @@
 ```python
 from app.rules.api import run_review
 
-findings = await run_review(contract_text, "nda")   # list[Finding], most severe first
+findings = await run_review(contract_text, "nda")   # list[ReviewFinding], most severe first; strict
 ```
 
 Or over HTTP, with a logged-in user's token: `POST /reviews` with `{"contract_text": "...", "contract_type_id": "nda"}`.
@@ -14,10 +14,22 @@ Or over HTTP, with a logged-in user's token: `POST /reviews` with `{"contract_te
 
 Every shipped rule, and the NDA completeness config, is `unverified`. Until a lawyer verifies a rule:
 
-- its findings are capped at **LOW**, whatever severity the file says;
-- `run_review(..., strict=True)` and `RuleLoader(strict=True)` (the loader's default) skip it entirely.
+- strict mode skips it entirely. `run_review` and `RuleLoader` are strict by default, and so is `POST /reviews`. Strict mode also skips an unverified completeness config;
+- with `strict=False` (demo and testing only) it runs, and its findings are capped at **LOW**, whatever severity the file says.
 
-`run_review` defaults to `strict=False` so the demo returns findings. Switch the default to strict before real users see results.
+Every finding `run_review` returns carries `verification_status` from the rule or config that raised it. That field is not a `findings` column, so `to_insert_row()` leaves it out.
+
+`POST /reviews` (add `?strict=false` for demo mode) returns:
+
+```json
+{"strict_mode": true, "status": "ok", "notice": null, "findings": [...]}
+```
+
+| `status` | When |
+|---|---|
+| `ok` | strict, and verified rules raised findings |
+| `no_verified_rules_matched` | strict, and nothing verified fired. Still a 200 with `findings: []`. While every rule is unverified, this is the only strict answer |
+| `demo_includes_unverified` | `strict=false`. `notice` is set; show it wherever these findings appear |
 
 ## Rule files
 

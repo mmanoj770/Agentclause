@@ -1,18 +1,21 @@
 """run_review(): the single entry point for a rules-based review (R3 completeness + R4 rule engine)."""
+from enum import Enum
 from functools import lru_cache
 from pathlib import Path
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
 from app.auth.dependencies import CurrentUser, get_current_user
 from app.rules.completeness import CompletenessChecker
 from app.rules.engine import RuleEvaluator
-from app.rules.schema import Rule, RuleLoader
+from app.rules.schema import Rule, RuleLoader, VerificationStatus
 from app.schemas.finding import Finding, Severity
 
 RULES_DIR = Path(__file__).parent / "rules"
 _SEVERITY_ORDER = {Severity.CRITICAL: 0, Severity.HIGH: 1, Severity.MEDIUM: 2, Severity.LOW: 3}
+DEMO_NOTICE = ("Demo mode: these findings include rules no lawyer has verified. "
+               "Do not rely on them or show them to users as advice.")
 
 
 @lru_cache
@@ -26,19 +29,35 @@ def _checkers() -> dict[str, CompletenessChecker]:
     return {nda.contract_type: nda}
 
 
-async def run_review(contract_text: str, contract_type_id: str, *, strict: bool = False) -> list[Finding]:
+class ReviewFinding(Finding):
+    """A Finding plus the verification status of the rule that raised it.
+
+    verification_status is not a `findings` column; to_insert_row() leaves it out.
+    """
+    verification_status: VerificationStatus = Field(
+        description="Whether a lawyer has verified the rule (or completeness config) behind this finding.",
+    )
+
+
+async def run_review(contract_text: str, contract_type_id: str, *, strict: bool = True) -> list[ReviewFinding]:
     """Review normalised contract text and return findings, most severe first.
 
     contract_type_id is a contract_types code, e.g. "nda".
-    strict=False (the default, while every rule is unverified) also runs unverified rules; their
-    findings are capped at LOW. strict=True runs verified rules only.
+    strict=True (the default) runs verified rules and verified completeness configs only.
+    strict=False is for demos and tests: it also runs unverified ones, whose findings are capped at LOW.
     """
     contract_type = contract_type_id.strip().lower()
-    rule_findings = RuleEvaluator(list(_rules(strict))).evaluate(contract_text, contract_type)
+    rules = _rules(strict)
+    rule_status = {r.rule_id: r.verification_status for r in rules}
+    rule_findings = [ReviewFinding(**f.model_dump(), verification_status=rule_status[f.rule_applied])
+                     for f in RuleEvaluator(list(rules)).evaluate(contract_text, contract_type)]
 
     checker = _checkers().get(contract_type)
+    if checker and strict and not checker.verified:
+        checker = None
     reported = {f.rule_applied for f in rule_findings}
-    completeness = [f for f in (checker.check(contract_text) if checker else [])
+    completeness = [ReviewFinding(**f.model_dump(), verification_status=checker.verification_status)
+                    for f in (checker.check(contract_text) if checker else [])
                     if f.rule_applied not in reported]
 
     return sorted(rule_findings + completeness,
@@ -53,7 +72,26 @@ class ReviewRequest(BaseModel):
     contract_type_id: str = Field(min_length=1, max_length=64)
 
 
+class ReviewStatus(str, Enum):
+    OK = "ok"                                                # strict: verified findings returned
+    NO_VERIFIED_RULES_MATCHED = "no_verified_rules_matched"  # strict: nothing verified fired
+    DEMO_INCLUDES_UNVERIFIED = "demo_includes_unverified"    # strict=false: never treat as verified
+
+
+class ReviewResponse(BaseModel):
+    strict_mode: bool
+    status: ReviewStatus
+    notice: str | None = Field(default=None, description="Set in demo mode; say it wherever findings are shown.")
+    findings: list[ReviewFinding]
+
+
 @router.post("")
 async def create_review(body: ReviewRequest,
-                        user: CurrentUser = Depends(get_current_user)) -> list[Finding]:
-    return await run_review(body.contract_text, body.contract_type_id)
+                        strict: bool = Query(True, description="false = demo/testing only: includes unverified rules."),
+                        user: CurrentUser = Depends(get_current_user)) -> ReviewResponse:
+    findings = await run_review(body.contract_text, body.contract_type_id, strict=strict)
+    if not strict:
+        return ReviewResponse(strict_mode=False, status=ReviewStatus.DEMO_INCLUDES_UNVERIFIED,
+                              notice=DEMO_NOTICE, findings=findings)
+    status = ReviewStatus.OK if findings else ReviewStatus.NO_VERIFIED_RULES_MATCHED
+    return ReviewResponse(strict_mode=True, status=status, findings=findings)

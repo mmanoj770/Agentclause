@@ -48,9 +48,17 @@ class CompletenessChecker:
     def contract_type(self) -> str:
         return self.config.contract_type
 
+    @property
+    def verification_status(self) -> VerificationStatus:
+        return self.config.verification_status
+
+    @property
+    def verified(self) -> bool:
+        return self.config.verification_status is VerificationStatus.VERIFIED
+
     def check(self, text: str) -> list[Finding]:
         normalised = normalise(text)
-        verified = self.config.verification_status is VerificationStatus.VERIFIED
+        verified = self.verified
         findings = []
         for req in self.config.required:
             clause = CLAUSES[req.clause]

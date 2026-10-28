@@ -1,14 +1,16 @@
 import asyncio
 import json
 from datetime import date
+from uuid import uuid4
 
 import pytest
 
 from app.auth.dependencies import CurrentUser, get_current_user
+from app.rules import api
 from app.rules.api import RULES_DIR, run_review
 from app.rules.completeness import CompletenessChecker
 from app.rules.engine import RuleEvaluator
-from app.rules.schema import Rule, RuleError, RuleLoader, RuleValidator
+from app.rules.schema import Rule, RuleError, RuleLoader, RuleValidator, VerificationStatus
 from app.schemas.finding import Layer, Severity
 
 VALID = {
@@ -161,42 +163,88 @@ def test_completeness_reports_every_missing_clause_at_low_while_unverified():
 
 # --- run_review -------------------------------------------------------------------------------
 
-def test_run_review_returns_findings():
+def demo(text, contract_type="nda"):
+    return review(text, contract_type, strict=False)
+
+
+def test_run_review_is_strict_by_default():
+    # Every shipped rule and the NDA completeness config are unverified, so the default returns nothing,
+    # even for a bare page that misses every required clause.
+    assert review("A bare page.") == []
+    assert review(NDA_WITH_RESTRAINT) == []
+    assert review("A bare page.", strict=True) == []
+
+
+def test_run_review_strict_runs_verified_rules(monkeypatch):
+    verified = rule(severity="high", verification_status="verified")
+    monkeypatch.setattr(api, "_rules", lambda strict: (verified,))
     findings = review(NDA_NO_GOVERNING_LAW)
+    assert [(f.rule_applied, f.severity, f.verification_status) for f in findings] == [
+        ("NDA_GOVERNING_LAW_MISSING", Severity.HIGH, VerificationStatus.VERIFIED)]
+
+
+def test_run_review_demo_returns_unverified_findings_marked_unverified():
+    findings = demo(NDA_NO_GOVERNING_LAW)
     assert [f.rule_applied for f in findings] == ["NDA_GOVERNING_LAW_MISSING"]
+    assert {f.verification_status for f in demo("A bare page.")} == {VerificationStatus.UNVERIFIED}
+    assert "ICA_S27_RESTRAINT_OF_TRADE" in [f.rule_applied for f in demo(NDA_WITH_RESTRAINT)]
 
 
 def test_run_review_reports_a_missing_clause_once():
     # The rule file and the completeness checker both cover governing law; only one finding comes back.
-    ids = [f.rule_applied for f in review(NDA_NO_GOVERNING_LAW)]
+    ids = [f.rule_applied for f in demo(NDA_NO_GOVERNING_LAW)]
     assert ids.count("NDA_GOVERNING_LAW_MISSING") == 1
 
 
 def test_run_review_clean_nda_returns_empty_list():
-    assert review(CLEAN_NDA) == []
-
-
-def test_run_review_strict_mode_runs_no_unverified_rules():
-    assert [f.rule_applied for f in review(NDA_WITH_RESTRAINT, strict=True)] == []
-    assert "ICA_S27_RESTRAINT_OF_TRADE" in [f.rule_applied for f in review(NDA_WITH_RESTRAINT)]
+    assert demo(CLEAN_NDA) == []
 
 
 def test_run_review_sorted_by_severity():
-    findings = review("A bare page.")
+    findings = demo("A bare page.")
     order = ["critical", "high", "medium", "low"]
     assert [order.index(f.severity.value) for f in findings] == sorted(order.index(f.severity.value) for f in findings)
 
 
-def test_reviews_endpoint(client):
+def test_review_finding_is_not_a_findings_column():
+    f = demo(NDA_NO_GOVERNING_LAW)[0]
+    assert "verification_status" not in f.to_insert_row(uuid4(), uuid4())
+
+
+@pytest.fixture
+def logged_in():
     from app.main import app
     app.dependency_overrides[get_current_user] = lambda: CurrentUser(id="u", email=None, role="startup_user", org_id=None)
-    try:
-        r = client.post("/reviews", json={"contract_text": NDA_NO_GOVERNING_LAW, "contract_type_id": "nda"})
-        assert r.status_code == 200
-        assert [f["rule_applied"] for f in r.json()] == ["NDA_GOVERNING_LAW_MISSING"]
-        assert client.post("/reviews", json={"contract_text": "", "contract_type_id": "nda"}).status_code == 422
-    finally:
-        app.dependency_overrides.clear()
+    yield
+    app.dependency_overrides.clear()
+
+
+def post_review(client, text, query=""):
+    return client.post(f"/reviews{query}", json={"contract_text": text, "contract_type_id": "nda"})
+
+
+def test_reviews_endpoint_strict_by_default_with_no_verified_rules(client, logged_in):
+    r = post_review(client, NDA_NO_GOVERNING_LAW)
+    assert r.status_code == 200
+    assert r.json() == {"strict_mode": True, "status": "no_verified_rules_matched", "notice": None, "findings": []}
+    assert client.post("/reviews", json={"contract_text": "", "contract_type_id": "nda"}).status_code == 422
+
+
+def test_reviews_endpoint_strict_returns_verified_findings(client, logged_in, monkeypatch):
+    monkeypatch.setattr(api, "_rules", lambda strict: (rule(verification_status="verified"),))
+    body = post_review(client, NDA_NO_GOVERNING_LAW).json()
+    assert (body["strict_mode"], body["status"], body["notice"]) == (True, "ok", None)
+    assert [(f["rule_applied"], f["verification_status"]) for f in body["findings"]] == [
+        ("NDA_GOVERNING_LAW_MISSING", "verified")]
+
+
+def test_reviews_endpoint_demo_mode_is_labelled(client, logged_in):
+    r = post_review(client, NDA_NO_GOVERNING_LAW, "?strict=false")
+    assert r.status_code == 200
+    body = r.json()
+    assert (body["strict_mode"], body["status"], body["notice"]) == (False, "demo_includes_unverified", api.DEMO_NOTICE)
+    assert [(f["rule_applied"], f["verification_status"]) for f in body["findings"]] == [
+        ("NDA_GOVERNING_LAW_MISSING", "unverified")]
 
 
 def test_reviews_endpoint_requires_login(client):

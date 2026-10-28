@@ -12,3 +12,4 @@ numpy
 sentence-transformers
 google-genai
 anthropic
+tzdata

@@ -10,7 +10,7 @@ from app.rules import api
 from app.rules.api import RULES_DIR, run_review
 from app.rules.completeness import CompletenessChecker
 from app.rules.engine import RuleEvaluator
-from app.rules.schema import Rule, RuleError, RuleLoader, RuleValidator, VerificationStatus
+from app.rules.schema import Rule, RuleError, RuleLoader, RuleValidator, VerificationStatus, base_rule_id
 from app.schemas.finding import Layer, Severity
 
 VALID = {
@@ -21,6 +21,7 @@ VALID = {
     "condition": "missing_clause('governing-law')",
     "severity": "HIGH",
     "remedy_suggested": "Add a governing-law clause.",
+    "version": 1,
     "effective_from": "2024-01-01",
     "verification_status": "unverified",
 }
@@ -115,7 +116,7 @@ def test_unverified_rules_skipped_in_strict_mode(tmp_path):
 
 def test_rule_fires_when_clause_missing():
     [f] = RuleEvaluator([rule()]).evaluate(NDA_NO_GOVERNING_LAW, "nda")
-    assert f.rule_applied == "NDA_GOVERNING_LAW_MISSING"
+    assert f.rule_applied == "NDA_GOVERNING_LAW_MISSING@1"
     assert f.clause_reference == "Missing" and f.layer is Layer.COMPLETENESS
 
 
@@ -161,6 +162,104 @@ def test_completeness_reports_every_missing_clause_at_low_while_unverified():
     assert all(f.layer is Layer.COMPLETENESS and f.citation.startswith("Internal:") for f in findings)
 
 
+# --- versions ---------------------------------------------------------------------------------
+
+def write_rules(directory, **files):
+    for name, changes in files.items():
+        (directory / f"{name}.json").write_text(json.dumps({**VALID, **changes}))
+
+
+@pytest.mark.parametrize("change", [
+    {"version": 0},
+    {"version": "1"},
+    {"version": 1.5},
+    {"version": True},
+    {"effective_to": "2023-12-31"},                      # before effective_from
+    {"superseded_by": "lowercase"},
+    {"superseded_by": "NDA_GOVERNING_LAW_MISSING@1"},    # itself
+])
+def test_bad_version_fields_rejected(change):
+    with pytest.raises(RuleError):
+        rule(**change)
+
+
+def test_missing_version_rejected_with_the_file_name(tmp_path):
+    (tmp_path / "no_version.json").write_text(json.dumps({k: v for k, v in VALID.items() if k != "version"}))
+    with pytest.raises(RuleError, match=r"no_version\.json: version: Field required"):
+        RuleLoader(tmp_path, strict=False).load()
+
+
+def test_shipped_rules_are_all_version_1():
+    assert {r.version for r in RuleLoader(RULES_DIR, strict=False).load_all()} == {1}
+
+
+def test_version_in_force_is_picked_by_date(tmp_path):
+    write_rules(tmp_path, v1={"version": 1, "effective_to": "2025-12-31"},
+                v2={"version": 2, "effective_from": "2026-01-01", "effective_to": "2026-06-30"})
+
+    def version_on(day):
+        return [r.version for r in RuleLoader(tmp_path, strict=False, on=day).load()]
+
+    assert version_on(date(2023, 12, 31)) == []         # before v1
+    assert version_on(date(2025, 12, 31)) == [1]        # v1's last day (effective_to is inclusive)
+    assert version_on(date(2026, 1, 1)) == [2]
+    assert version_on(date(2026, 7, 1)) == []           # after v2 ended
+
+
+def test_strict_does_not_fall_back_to_an_older_verified_version(tmp_path):
+    write_rules(tmp_path, v1={"version": 1, "effective_to": "2025-12-31", "verification_status": "verified"},
+                v2={"version": 2, "effective_from": "2026-01-01"})
+    assert RuleLoader(tmp_path, on=date(2026, 3, 1)).load() == []
+    assert [r.version for r in RuleLoader(tmp_path, on=date(2025, 3, 1)).load()] == [1]
+
+
+@pytest.mark.parametrize("v1, v2", [
+    ({}, {"effective_from": "2026-01-01"}),                                   # v1 is open-ended
+    ({"effective_to": "2026-01-01"}, {"effective_from": "2026-01-01"}),       # one shared day
+    ({"effective_to": "2026-12-31"}, {"effective_from": "2025-01-01", "effective_to": "2025-06-30"}),  # v2 inside v1
+])
+def test_overlapping_versions_rejected_naming_the_file(tmp_path, v1, v2):
+    write_rules(tmp_path, a_v1={"version": 1, **v1}, b_v2={"version": 2, **v2})
+    with pytest.raises(RuleError, match=r"b_v2\.json: NDA_GOVERNING_LAW_MISSING@2 .* overlap .*a_v1\.json"):
+        RuleLoader(tmp_path, strict=False).load()
+
+
+def test_same_version_twice_rejected(tmp_path):
+    write_rules(tmp_path, a={"effective_to": "2024-12-31"}, b={"effective_from": "2025-01-01"})
+    with pytest.raises(RuleError, match=r"b\.json: duplicate rule_id NDA_GOVERNING_LAW_MISSING version 1"):
+        RuleLoader(tmp_path, strict=False).load()
+
+
+def test_superseded_by_must_name_a_known_rule(tmp_path):
+    write_rules(tmp_path, old={"rule_id": "OLD_RULE", "superseded_by": "NDA_GOVERNING_LAW_MISSING@1"}, new={})
+    assert len(RuleLoader(tmp_path, strict=False).load()) == 2
+    write_rules(tmp_path, old={"rule_id": "OLD_RULE", "superseded_by": "NDA_GOVERNING_LAW_MISSING@2"})
+    with pytest.raises(RuleError, match=r"old\.json: superseded_by names unknown rule"):
+        RuleLoader(tmp_path, strict=False).load()
+
+
+def test_finding_carries_the_rule_version():
+    [f] = RuleEvaluator([rule(version=3)]).evaluate(NDA_NO_GOVERNING_LAW, "nda")
+    assert f.rule_applied == "NDA_GOVERNING_LAW_MISSING@3"
+    assert f.to_insert_row(uuid4(), uuid4())["rule_applied"] == "NDA_GOVERNING_LAW_MISSING@3"
+
+
+def test_run_review_uses_the_version_in_force_on_the_date(monkeypatch, tmp_path):
+    write_rules(tmp_path, v1={"version": 1, "effective_to": "2025-12-31"},
+                v2={"version": 2, "effective_from": "2026-01-01"})
+    monkeypatch.setattr(api, "RULES_DIR", tmp_path)
+    api._rules.cache_clear()
+    try:
+        assert demo_on(date(2025, 6, 1)) == ["NDA_GOVERNING_LAW_MISSING@1"]
+        assert demo_on(date(2026, 6, 1)) == ["NDA_GOVERNING_LAW_MISSING@2"]
+    finally:
+        api._rules.cache_clear()
+
+
+def demo_on(day):
+    return [f.rule_applied for f in review(NDA_NO_GOVERNING_LAW, strict=False, on=day)]
+
+
 # --- run_review -------------------------------------------------------------------------------
 
 def demo(text, contract_type="nda"):
@@ -177,22 +276,22 @@ def test_run_review_is_strict_by_default():
 
 def test_run_review_strict_runs_verified_rules(monkeypatch):
     verified = rule(severity="high", verification_status="verified")
-    monkeypatch.setattr(api, "_rules", lambda strict: (verified,))
+    monkeypatch.setattr(api, "_rules", lambda strict, on: (verified,))
     findings = review(NDA_NO_GOVERNING_LAW)
     assert [(f.rule_applied, f.severity, f.verification_status) for f in findings] == [
-        ("NDA_GOVERNING_LAW_MISSING", Severity.HIGH, VerificationStatus.VERIFIED)]
+        ("NDA_GOVERNING_LAW_MISSING@1", Severity.HIGH, VerificationStatus.VERIFIED)]
 
 
 def test_run_review_demo_returns_unverified_findings_marked_unverified():
     findings = demo(NDA_NO_GOVERNING_LAW)
-    assert [f.rule_applied for f in findings] == ["NDA_GOVERNING_LAW_MISSING"]
+    assert [f.rule_applied for f in findings] == ["NDA_GOVERNING_LAW_MISSING@1"]
     assert {f.verification_status for f in demo("A bare page.")} == {VerificationStatus.UNVERIFIED}
-    assert "ICA_S27_RESTRAINT_OF_TRADE" in [f.rule_applied for f in demo(NDA_WITH_RESTRAINT)]
+    assert "ICA_S27_RESTRAINT_OF_TRADE@1" in [f.rule_applied for f in demo(NDA_WITH_RESTRAINT)]
 
 
 def test_run_review_reports_a_missing_clause_once():
     # The rule file and the completeness checker both cover governing law; only one finding comes back.
-    ids = [f.rule_applied for f in demo(NDA_NO_GOVERNING_LAW)]
+    ids = [base_rule_id(f.rule_applied) for f in demo(NDA_NO_GOVERNING_LAW)]
     assert ids.count("NDA_GOVERNING_LAW_MISSING") == 1
 
 
@@ -231,11 +330,11 @@ def test_reviews_endpoint_strict_by_default_with_no_verified_rules(client, logge
 
 
 def test_reviews_endpoint_strict_returns_verified_findings(client, logged_in, monkeypatch):
-    monkeypatch.setattr(api, "_rules", lambda strict: (rule(verification_status="verified"),))
+    monkeypatch.setattr(api, "_rules", lambda strict, on: (rule(verification_status="verified"),))
     body = post_review(client, NDA_NO_GOVERNING_LAW).json()
     assert (body["strict_mode"], body["status"], body["notice"]) == (True, "ok", None)
     assert [(f["rule_applied"], f["verification_status"]) for f in body["findings"]] == [
-        ("NDA_GOVERNING_LAW_MISSING", "verified")]
+        ("NDA_GOVERNING_LAW_MISSING@1", "verified")]
 
 
 def test_reviews_endpoint_demo_mode_is_labelled(client, logged_in):
@@ -244,7 +343,7 @@ def test_reviews_endpoint_demo_mode_is_labelled(client, logged_in):
     body = r.json()
     assert (body["strict_mode"], body["status"], body["notice"]) == (False, "demo_includes_unverified", api.DEMO_NOTICE)
     assert [(f["rule_applied"], f["verification_status"]) for f in body["findings"]] == [
-        ("NDA_GOVERNING_LAW_MISSING", "unverified")]
+        ("NDA_GOVERNING_LAW_MISSING@1", "unverified")]
 
 
 def test_reviews_endpoint_requires_login(client):

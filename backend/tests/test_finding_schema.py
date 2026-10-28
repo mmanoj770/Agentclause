@@ -51,6 +51,12 @@ def test_insert_row_matches_table():
     assert Finding.from_db_row(row) == f
 
 
+def test_rule_applied_may_carry_a_rule_version():
+    # findings.rule_applied is plain text (migration 05): a versioned ID needs no migration.
+    f = Finding.model_validate({**load_example(), "rule_applied": "ICA_S27_RESTRAINT_OF_TRADE@12"})
+    assert Finding.from_db_row(f.to_insert_row(uuid4(), uuid4())).rule_applied == "ICA_S27_RESTRAINT_OF_TRADE@12"
+
+
 @pytest.mark.parametrize("status, action", [
     ("pending", None), ("confirmed", "confirm"), ("overridden", "override"), ("added", "add"),
 ])
@@ -68,6 +74,10 @@ def test_status_maps_to_advocate_action(status, action):
     {"layer": 7},
     {"description": "  "},
     {"rule_applied": "governing law"},
+    {"rule_applied": "NDA_GOVERNING_LAW_MISSING@"},
+    {"rule_applied": "NDA_GOVERNING_LAW_MISSING@0"},
+    {"rule_applied": "NDA_GOVERNING_LAW_MISSING@v1"},
+    {"rule_applied": "NDA_GOVERNING_LAW_MISSING@1@2"},
     {"status": "done"},
     {"citation_type": "MADE_UP"},
     {"citation_type": "statutory"},

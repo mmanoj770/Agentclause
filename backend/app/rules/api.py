@@ -1,4 +1,5 @@
 """run_review(): the single entry point for a rules-based review (R3 completeness + R4 rule engine)."""
+from datetime import date
 from enum import Enum
 from functools import lru_cache
 from pathlib import Path
@@ -9,7 +10,7 @@ from pydantic import BaseModel, Field
 from app.auth.dependencies import CurrentUser, get_current_user
 from app.rules.completeness import CompletenessChecker
 from app.rules.engine import RuleEvaluator
-from app.rules.schema import Rule, RuleLoader, VerificationStatus
+from app.rules.schema import Rule, RuleLoader, VerificationStatus, base_rule_id
 from app.schemas.finding import Finding, Severity
 
 RULES_DIR = Path(__file__).parent / "rules"
@@ -18,9 +19,9 @@ DEMO_NOTICE = ("Demo mode: these findings include rules no lawyer has verified. 
                "Do not rely on them or show them to users as advice.")
 
 
-@lru_cache
-def _rules(strict: bool) -> tuple[Rule, ...]:
-    return tuple(RuleLoader(RULES_DIR, strict=strict).load())
+@lru_cache(maxsize=16)
+def _rules(strict: bool, on: date) -> tuple[Rule, ...]:
+    return tuple(RuleLoader(RULES_DIR, strict=strict, on=on).load())
 
 
 @lru_cache
@@ -39,23 +40,26 @@ class ReviewFinding(Finding):
     )
 
 
-async def run_review(contract_text: str, contract_type_id: str, *, strict: bool = True) -> list[ReviewFinding]:
+async def run_review(contract_text: str, contract_type_id: str, *, strict: bool = True,
+                     on: date | None = None) -> list[ReviewFinding]:
     """Review normalised contract text and return findings, most severe first.
 
     contract_type_id is a contract_types code, e.g. "nda".
     strict=True (the default) runs verified rules and verified completeness configs only.
     strict=False is for demos and tests: it also runs unverified ones, whose findings are capped at LOW.
+    on picks the rule versions in force on that date (default today).
     """
+    day = on or date.today()
     contract_type = contract_type_id.strip().lower()
-    rules = _rules(strict)
-    rule_status = {r.rule_id: r.verification_status for r in rules}
+    rules = _rules(strict, day)
+    rule_status = {r.versioned_id: r.verification_status for r in rules}
     rule_findings = [ReviewFinding(**f.model_dump(), verification_status=rule_status[f.rule_applied])
-                     for f in RuleEvaluator(list(rules)).evaluate(contract_text, contract_type)]
+                     for f in RuleEvaluator(list(rules), today=day).evaluate(contract_text, contract_type)]
 
     checker = _checkers().get(contract_type)
     if checker and strict and not checker.verified:
         checker = None
-    reported = {f.rule_applied for f in rule_findings}
+    reported = {base_rule_id(f.rule_applied) for f in rule_findings}
     completeness = [ReviewFinding(**f.model_dump(), verification_status=checker.verification_status)
                     for f in (checker.check(contract_text) if checker else [])
                     if f.rule_applied not in reported]

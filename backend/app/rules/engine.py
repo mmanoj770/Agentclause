@@ -37,7 +37,7 @@ class RuleEvaluator:
         normalised = normalise(text)
         findings = []
         for rule in self.rules:
-            if contract_type not in rule.applies_to or rule.effective_from > self.today:
+            if contract_type not in rule.applies_to or not rule.in_force_on(self.today):
                 continue
             clause_reference = self._fires(rule, text, normalised)
             if clause_reference is not None:
@@ -72,7 +72,7 @@ class RuleEvaluator:
             severity=finding_severity(rule.severity, rule.verified),
             clause_reference=clause_reference,
             description=description,
-            rule_applied=rule.rule_id,
+            rule_applied=rule.versioned_id,
             remedy_suggested=rule.remedy_suggested,
             citation=rule.citation,
             citation_type=rule.citation_type,

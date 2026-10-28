@@ -7,6 +7,7 @@
   "severity": "critical",
   "description": "The contract restrains a party from carrying on a business or trade. Under s.27 such a restraint is void unless it falls within the sale-of-goodwill exception.",
   "remedy_suggested": "Remove the restraint, or narrow it to non-solicitation and non-use of Confidential Information, which s.27 does not void.",
+  "version": 1,
   "effective_from": "2024-01-01",
   "verification_status": "unverified"
 }

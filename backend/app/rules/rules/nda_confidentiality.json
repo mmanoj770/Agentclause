@@ -7,6 +7,7 @@
   "severity": "high",
   "description": "The NDA never defines \"Confidential Information\", so it is unclear what the obligations protect.",
   "remedy_suggested": "Add a definition: \"Confidential Information\" means all information disclosed by the Disclosing Party, in any form, that is marked confidential or would reasonably be understood to be confidential.",
+  "version": 1,
   "effective_from": "2024-01-01",
   "verification_status": "unverified"
 }

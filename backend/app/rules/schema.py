@@ -71,8 +71,20 @@ class Rule(BaseModel):
     description: str | None = Field(default=None, min_length=1,
                                     description="What the finding says. Generated from the condition if omitted.")
     remedy_suggested: str = Field(min_length=1)
+    version: int = Field(ge=1, description="Starts at 1; a changed rule is a new file with the next version.")
     effective_from: date
+    effective_to: date | None = Field(default=None, description="Last day in force (inclusive). None = open-ended.")
+    superseded_by: str | None = Field(default=None, pattern=r"^[A-Z][A-Z0-9_]*(@[1-9][0-9]*)?$",
+                                      description="The rule (\"RULE_ID\" or \"RULE_ID@<version>\") that replaces this one.")
     verification_status: VerificationStatus
+
+    @field_validator("version", mode="before")
+    @classmethod
+    def _integer_version(cls, v: Any) -> Any:
+        # Pydantic would accept "1" or 1.0; a version is written as a plain integer.
+        if isinstance(v, bool) or not isinstance(v, int):
+            raise ValueError("version must be an integer, e.g. 1")
+        return v
 
     @field_validator("severity", "verification_status", mode="before")
     @classmethod
@@ -92,6 +104,14 @@ class Rule(BaseModel):
     def _condition(cls, v: str) -> str:
         parse_condition(v)
         return v
+
+    @model_validator(mode="after")
+    def _dates(self) -> "Rule":
+        if self.effective_to is not None and self.effective_to < self.effective_from:
+            raise ValueError("effective_to is before effective_from")
+        if self.superseded_by in (self.rule_id, self.versioned_id):
+            raise ValueError("a rule cannot be superseded by itself")
+        return self
 
     @model_validator(mode="after")
     def _citation_shape(self) -> "Rule":
@@ -117,6 +137,25 @@ class Rule(BaseModel):
     @property
     def verified(self) -> bool:
         return self.verification_status is VerificationStatus.VERIFIED
+
+    @property
+    def versioned_id(self) -> str:
+        """What a finding records as rule_applied, e.g. "ICA_S27_RESTRAINT_OF_TRADE@1"."""
+        return f"{self.rule_id}@{self.version}"
+
+    def in_force_on(self, day: date) -> bool:
+        return self.effective_from <= day and (self.effective_to is None or day <= self.effective_to)
+
+    def overlaps(self, other: "Rule") -> bool:
+        """True if the two date ranges share a day (both ends inclusive)."""
+        never = date.max
+        return (self.effective_from <= (other.effective_to or never)
+                and other.effective_from <= (self.effective_to or never))
+
+
+def base_rule_id(rule_applied: str) -> str:
+    """"ICA_S27_RESTRAINT_OF_TRADE@1" -> "ICA_S27_RESTRAINT_OF_TRADE". Unversioned IDs come back as they are."""
+    return rule_applied.split("@", 1)[0]
 
 
 class RuleValidator:
@@ -144,18 +183,37 @@ class RuleValidator:
 class RuleLoader:
     """Loads every *.json rule in a directory. Any bad file stops the load: rules never fail silently.
 
-    strict=True (the default) returns verified rules only.
+    A rule_id may have several versions, one file each, whose effective dates must not overlap. load()
+    returns, per rule_id, the version in force on `on` (default today). strict=True (the default) then
+    keeps verified rules only; it never falls back to an older verified version.
     """
 
-    def __init__(self, directory: Path, strict: bool = True):
+    def __init__(self, directory: Path, strict: bool = True, on: date | None = None):
         self.directory = Path(directory)
         self.strict = strict
+        self.on = on
 
-    def load(self) -> list[Rule]:
-        rules: dict[str, Rule] = {}
+    def load_all(self) -> list[Rule]:
+        """Every version of every rule, after checking versions and dates are consistent."""
+        versions: dict[str, list[tuple[Rule, str]]] = {}
         for path in sorted(self.directory.glob("*.json")):
             rule = RuleValidator.validate_file(path)
-            if rule.rule_id in rules:
-                raise RuleError(f"{path.name}: duplicate rule_id {rule.rule_id}")
-            rules[rule.rule_id] = rule
-        return [r for r in rules.values() if r.verified or not self.strict]
+            for other, other_file in versions.get(rule.rule_id, []):
+                if other.version == rule.version:
+                    raise RuleError(f"{path.name}: duplicate rule_id {rule.rule_id} version {rule.version} "
+                                    f"(also in {other_file})")
+                if other.overlaps(rule):
+                    raise RuleError(f"{path.name}: {rule.versioned_id} is in force on dates that overlap "
+                                    f"{other.versioned_id} in {other_file}")
+            versions.setdefault(rule.rule_id, []).append((rule, path.name))
+        known = set(versions) | {r.versioned_id for entries in versions.values() for r, _ in entries}
+        for entries in versions.values():
+            for rule, name in entries:
+                if rule.superseded_by and rule.superseded_by not in known:
+                    raise RuleError(f"{name}: superseded_by names unknown rule {rule.superseded_by}")
+        return [rule for entries in versions.values() for rule, _ in entries]
+
+    def load(self) -> list[Rule]:
+        day = self.on or date.today()
+        in_force = [r for r in self.load_all() if r.in_force_on(day)]
+        return [r for r in in_force if r.verified or not self.strict]

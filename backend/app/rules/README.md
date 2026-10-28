@@ -54,6 +54,7 @@ One JSON object per file in `rules/`. Any malformed file stops loading with an e
 | `severity` | `critical`, `high`, `medium` or `low` |
 | `description` | Optional. What the finding says; generated from the condition if omitted |
 | `remedy_suggested` | What to change |
+| `basis` | Optional. The section's operative words, quoted, so a reviewer can check the rule against the statute. Never shown to users |
 | `effective_from` | `YYYY-MM-DD`; the first day this version is in force |
 | `effective_to` | Optional. `YYYY-MM-DD`; the last day it is in force (inclusive). Omit for open-ended |
 | `superseded_by` | Optional. `RULE_ID` or `RULE_ID@<version>` of the rule that replaces this one; must be a loaded rule |
@@ -120,8 +121,28 @@ Completeness checks skipped in strict mode have `version: null`, because the com
 
 - `missing_clause('<id>')` fires when none of that clause's patterns in `clauses.py` appear. Clause IDs: `governing-law`, `confidentiality`, `confidential-info-definition`, `obligations`, `exclusions`, `term`, `return-destruction`, `residuals`.
 - `contains_text('a', 'b', ...)` fires when **any** of the phrases appears (case- and whitespace-insensitive). The finding points at the nearest clause number above the match.
+- `number_after_keyword_exceeds('<keyword>', <limit>, '<unit>')` fires when the keyword is followed, in the same sentence, by a number above `limit` in `unit`. Example: `('pay', 45, 'days')` fires on "shall pay within sixty (60) days" but not on "within 45 days". The limit is a whole number, with no quotes.
+  - The keyword matches as the start of a word, so `pay` matches pay, payment and payable, but not repay.
+  - The number must be in digits: "sixty (60) days" reads as 60, but "sixty days" is not seen.
+  - Up to two words may come between the number and the unit ("60 business days").
+  - A sentence ends at `;`, a blank line, or a full stop followed by a capital letter, and it looks at most 150 characters past the keyword. "Rs. 5,000" and "s. 15" don't end a sentence.
 
 Matching is keyword-based and will miss unusual wording. Treat a clean result as "nothing obvious", not "compliant".
+
+## R5 seed rules (test fixtures)
+
+These four rules were written from the statute text by a non-lawyer, as fixtures for the engine. All are `unverified`, so strict mode never returns them (`tests/test_seed_rules_r5.py` checks this). Each quotes its section in `basis`; check those quotes against the official text before verifying a rule.
+
+| Rule | Citation | Applies to | Fires on |
+|---|---|---|---|
+| `ICA_S28_RESTRAINT_OF_LEGAL_PROCEEDINGS` | Indian Contract Act, 1872, s. 28 | all 19 contract types | wording that bars court proceedings or shortens the time for claims ("must be brought within", "shall be time-barred") |
+| `ICA_S74_PENALTY_OR_LIQUIDATED_DAMAGES` | Indian Contract Act, 1872, s. 74 | all 19 contract types | a named sum or penalty for breach ("liquidated damages", "by way of penalty"), for a reasonableness check |
+| `MSMED_S15_PAYMENT_BEYOND_45_DAYS` | Micro, Small and Medium Enterprises Development Act, 2006, s. 15 | `msa`, `sla`, `vendor_supplier` | a payment period over 45 days |
+| `MSMED_S16_INTEREST_WAIVER` | Micro, Small and Medium Enterprises Development Act, 2006, s. 16 | `msa`, `sla`, `vendor_supplier` | wording that waives or caps interest on late payment |
+
+Known limits:
+- **s.28:** the Layer 5 stub corpus has no entry for ICA s.28 yet, so its findings would be blocked as `not_in_corpus` if they went through the gate. The phrase list avoids typical arbitration wording, because arbitration is s.28's Exception 1, but it can't tell an arbitration clause from a court bar.
+- **MSMED rules:** they can't tell whether the supplier is a registered micro or small enterprise, so every finding needs that check.
 
 ## Completeness config
 

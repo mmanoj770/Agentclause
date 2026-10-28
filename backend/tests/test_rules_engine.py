@@ -107,7 +107,9 @@ def test_duplicate_rule_id_rejected(tmp_path):
 def test_shipped_rule_files_are_valid():
     ids = {r.rule_id for r in RuleLoader(RULES_DIR, strict=False).load()}
     assert ids == {"NDA_GOVERNING_LAW_MISSING", "NDA_CONFIDENTIAL_INFO_DEFINITION_MISSING",
-                   "ICA_S27_RESTRAINT_OF_TRADE"}
+                   "ICA_S27_RESTRAINT_OF_TRADE", "ICA_S28_RESTRAINT_OF_LEGAL_PROCEEDINGS",
+                   "ICA_S74_PENALTY_OR_LIQUIDATED_DAMAGES", "MSMED_S15_PAYMENT_BEYOND_45_DAYS",
+                   "MSMED_S16_INTEREST_WAIVER"}
 
 
 def test_unverified_rules_skipped_in_strict_mode(tmp_path):
@@ -378,8 +380,9 @@ def test_one_log_line_per_review_with_counts_and_no_contract_text(caplog):
     with caplog.at_level("INFO", logger="app.rules.api"):
         review(NDA_WITH_RESTRAINT)
     [line] = [r.getMessage() for r in caplog.records if r.name == "app.rules.api"]
-    assert "strict=True" in line and "findings=0" in line and "skipped=11" in line
-    assert "unverified_in_strict_mode=11" in line
+    # 5 NDA rule files + 8 completeness checks unverified; the 2 MSMED rules don't apply to an NDA.
+    assert "strict=True" in line and "findings=0" in line and "skipped=15" in line
+    assert "not_applicable_to_contract_type=2" in line and "unverified_in_strict_mode=13" in line
     assert "Non-Compete" not in line and "Confidential" not in line
 
 
@@ -455,9 +458,11 @@ def test_reviews_endpoint_strict_by_default_with_no_verified_rules(client, logge
     body = r.json()
     assert (body["strict_mode"], body["status"], body["notice"], body["findings"]) == (
         True, "no_verified_rules_matched", None, [])
-    # Not "nothing found": all 3 rule files and the 8 completeness checks were skipped as unverified.
-    assert body["skipped_rules"]["count"] == 11 == len(body["skipped_rules"]["rules"])
-    assert {s["reason"] for s in body["skipped_rules"]["rules"]} == {"unverified_in_strict_mode"}
+    # Not "nothing found": the 5 NDA rule files and the 8 completeness checks were skipped as unverified,
+    # and the 2 MSMED rules as not applying to an NDA.
+    reasons = [s["reason"] for s in body["skipped_rules"]["rules"]]
+    assert body["skipped_rules"]["count"] == 15 == len(reasons)
+    assert (reasons.count("unverified_in_strict_mode"), reasons.count("not_applicable_to_contract_type")) == (13, 2)
     assert body["evaluation_date"] == today_in_india().isoformat()
     assert client.post("/reviews", json={"contract_text": "", "contract_type_id": "nda"}).status_code == 422
 

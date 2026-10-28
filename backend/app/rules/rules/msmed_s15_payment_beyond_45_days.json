@@ -1,0 +1,14 @@
+{
+  "rule_id": "MSMED_S15_PAYMENT_BEYOND_45_DAYS",
+  "statute": "Micro, Small and Medium Enterprises Development Act, 2006",
+  "section": "15",
+  "applies_to": ["msa", "sla", "vendor_supplier"],
+  "condition": "number_after_keyword_exceeds('pay', 45, 'days')",
+  "severity": "high",
+  "description": "The contract allows payment more than 45 days after the goods or services are delivered. If the supplier is a micro or small enterprise, s.15 caps the agreed payment period at 45 days from acceptance, whatever the contract says.",
+  "remedy_suggested": "Shorten the payment period to 45 days or less from acceptance of the goods or services. First check whether the supplier is registered as a micro or small enterprise (Udyam registration): the cap only protects those suppliers.",
+  "basis": "s.15: \"Where any supplier supplies any goods or renders any services to any buyer, the buyer shall make payment therefor on or before the date agreed upon between him and the supplier in writing or, where there is no agreement in this behalf, before the appointed day: Provided that in no case the period agreed upon between the supplier and the buyer in writing shall exceed forty-five days from the day of acceptance or the day of deemed acceptance.\"",
+  "version": 1,
+  "effective_from": "2024-01-01",
+  "verification_status": "unverified"
+}

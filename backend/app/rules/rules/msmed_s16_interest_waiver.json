@@ -1,0 +1,14 @@
+{
+  "rule_id": "MSMED_S16_INTEREST_WAIVER",
+  "statute": "Micro, Small and Medium Enterprises Development Act, 2006",
+  "section": "16",
+  "applies_to": ["msa", "sla", "vendor_supplier"],
+  "condition": "contains_text('no interest shall be payable', 'no interest shall accrue', 'shall not be liable to pay any interest', 'shall not be liable for any interest', 'waives any claim to interest', 'waives its right to interest', 'waives any right to interest', 'interest on delayed payment shall not exceed', 'interest on late payment shall not exceed')",
+  "severity": "high",
+  "description": "The contract waives or limits interest on late payment. If the supplier is a micro or small enterprise, s.16 makes a buyer who pays late liable for compound interest at three times the RBI bank rate, notwithstanding anything in the agreement, so this clause cannot take that right away.",
+  "remedy_suggested": "Remove the waiver or cap on late-payment interest. Either say nothing, or state that interest on late payment is payable as provided in section 16 of the MSMED Act. First check whether the supplier is a registered micro or small enterprise.",
+  "basis": "s.16: \"Where any buyer fails to make payment of the amount to the supplier, as required under section 15, the buyer shall, notwithstanding anything contained in any agreement between the buyer and the supplier or in any law for the time being in force, be liable to pay compound interest with monthly rests to the supplier on that amount from the appointed day or, as the case may be, from the date immediately following the date agreed upon, at three times of the bank rate notified by the Reserve Bank.\"",
+  "version": 1,
+  "effective_from": "2024-01-01",
+  "verification_status": "unverified"
+}

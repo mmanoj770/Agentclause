@@ -1,0 +1,14 @@
+{
+  "rule_id": "ICA_S28_RESTRAINT_OF_LEGAL_PROCEEDINGS",
+  "statute": "Indian Contract Act, 1872",
+  "section": "28",
+  "applies_to": ["commercial_lease", "consultant_freelancer", "distributor_dealership", "employment_contract", "equipment_lease", "esop", "founders_agreement", "intercreditor_hypothecation", "jva", "leave_and_license", "loan_debt", "msa", "nda", "non_compete_non_solicit", "partnership_deed", "sha", "sla", "term_sheet_investment", "vendor_supplier"],
+  "condition": "contains_text('shall not be entitled to institute', 'waives its right to institute', 'waives any right to bring', 'no suit or legal proceeding shall be', 'no legal proceedings shall be instituted', 'shall have no right to sue', 'must be brought within', 'shall be time-barred', 'shall be time barred', 'shall be forever barred', 'shall stand extinguished')",
+  "severity": "high",
+  "description": "The contract appears to stop a party from going to court to enforce its rights, or to cut short the time for doing so. Under s.28 such an agreement is void to that extent. An agreement to refer disputes to arbitration is an exception and is not void.",
+  "remedy_suggested": "Remove the bar on court proceedings and any shortened deadline for bringing claims, so the normal limitation period applies. If the aim is to keep disputes out of court, use an arbitration clause instead, which s.28 allows.",
+  "basis": "s.28: \"Every agreement,— (a) by which any party thereto is restricted absolutely from enforcing his rights under or in respect of any contract, by the usual legal proceedings in the ordinary tribunals, or which limits the time within which he may thus enforce his rights; or (b) which extinguishes the rights of any party thereto, or discharges any party thereto, from any liability, under or in respect of any contract on the expiry of a specified period so as to restrict any party from enforcing his rights, is void to that extent.\" Exception 1: \"This section shall not render illegal a contract, by which two or more persons agree that any dispute which may arise between them in respect of any subject or class of subjects shall be referred to arbitration ...\"",
+  "version": 1,
+  "effective_from": "2024-01-01",
+  "verification_status": "unverified"
+}

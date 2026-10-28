@@ -22,7 +22,7 @@ INDIA = ZoneInfo("Asia/Kolkata")
 # Matches migration 18's STATUTORY backfill pattern once rendered: "<Act>, <year>, s. <n>".
 _STATUTE = re.compile(r"^.+,\s*\d{4}$")
 _SECTION = re.compile(r"^\d+[A-Z]?(\(\w+\))*$")
-CONDITIONS = {"missing_clause", "contains_text"}
+CONDITIONS = {"missing_clause", "contains_text", "number_after_keyword_exceeds"}
 
 
 class VerificationStatus(str, Enum):
@@ -34,8 +34,12 @@ class RuleError(ValueError):
     """A rule file that can't be used. The message names the file and what is wrong."""
 
 
-def parse_condition(condition: str) -> tuple[str, tuple[str, ...]]:
-    """Parse `name('arg', ...)` into (name, args). Only known names and string arguments are allowed."""
+def parse_condition(condition: str) -> tuple[str, tuple[str | int, ...]]:
+    """Parse `name('arg', ...)` into (name, args). Only known names and literal arguments are allowed.
+
+    Every argument is a non-empty string, except number_after_keyword_exceeds(), whose second
+    argument is a whole number: ('keyword', limit, 'unit').
+    """
     try:
         node = ast.parse(condition.strip(), mode="eval").body
     except SyntaxError as e:
@@ -45,6 +49,13 @@ def parse_condition(condition: str) -> tuple[str, tuple[str, ...]]:
     name = node.func.id
     if name not in CONDITIONS:
         raise ValueError(f"unknown condition {name!r}; allowed: {sorted(CONDITIONS)}")
+    if name == "number_after_keyword_exceeds":
+        values = [a.value if isinstance(a, ast.Constant) else None for a in node.args]
+        if not (len(values) == 3 and isinstance(values[0], str) and values[0].strip()
+                and type(values[1]) is int and values[1] >= 0 and isinstance(values[2], str) and values[2].strip()):
+            raise ValueError("number_after_keyword_exceeds() takes ('keyword', limit, 'unit'), "
+                             "e.g. ('pay', 45, 'days'), with limit a whole number >= 0")
+        return name, (values[0].strip(), values[1], values[2].strip())
     if not node.args or not all(isinstance(a, ast.Constant) and isinstance(a.value, str) and a.value.strip()
                                 for a in node.args):
         raise ValueError(f"{name}() takes one or more non-empty string arguments")
@@ -69,11 +80,15 @@ class Rule(BaseModel):
     section: str = Field(min_length=1,
                          description="Section number (\"27\") for a statute; a short label for Internal.")
     applies_to: list[str] = Field(min_length=1, description="contract_types codes, e.g. [\"nda\"].")
-    condition: str = Field(description="missing_clause('<clause id>') or contains_text('<phrase>', ...).")
+    condition: str = Field(description="missing_clause('<clause id>'), contains_text('<phrase>', ...) or "
+                                       "number_after_keyword_exceeds('<keyword>', <limit>, '<unit>').")
     severity: Severity
     description: str | None = Field(default=None, min_length=1,
                                     description="What the finding says. Generated from the condition if omitted.")
     remedy_suggested: str = Field(min_length=1)
+    basis: str | None = Field(default=None, min_length=1,
+                              description="The section's operative words, quoted, so a reviewer can check the "
+                                          "rule against the statute. Not shown to users.")
     version: int = Field(ge=1, description="Starts at 1; a changed rule is a new file with the next version.")
     effective_from: date
     effective_to: date | None = Field(default=None, description="Last day in force (inclusive). None = open-ended.")

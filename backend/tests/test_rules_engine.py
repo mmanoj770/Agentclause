@@ -309,6 +309,29 @@ def test_a_date_between_two_versions_is_a_gap_error(tmp_path):
     assert [r.version for r in RuleLoader(tmp_path, strict=False, on=date(2026, 1, 1)).load()] == [2]
 
 
+def test_shipped_rule_files_have_no_gaps():
+    # Fails the moment a rules edit leaves a day between one version's effective_to and the next's start.
+    assert RuleLoader(RULES_DIR, strict=False).gaps() == []
+
+
+def test_gap_check_finds_a_gap_whatever_the_date(tmp_path):
+    write_rules(tmp_path, v1={"version": 1, "effective_to": "2025-06-30"},
+                v2={"version": 2, "effective_from": "2025-07-01", "effective_to": "2025-12-31"},
+                v3={"version": 3, "effective_from": "2026-02-01"})
+    assert RuleLoader(tmp_path, strict=False).gaps() == [
+        "NDA_GOVERNING_LAW_MISSING: NDA_GOVERNING_LAW_MISSING@2 ends 2025-12-31 but "
+        "NDA_GOVERNING_LAW_MISSING@3 starts 2026-02-01"]
+
+
+def test_a_gap_error_reaches_the_log(rules_dir, caplog):
+    write_rules(rules_dir, v1={"version": 1, "effective_to": "2025-06-30"},
+                v2={"version": 2, "effective_from": "2026-01-01"})
+    with caplog.at_level("ERROR", logger="app.rules.api"), pytest.raises(RuleGapError):
+        review(NDA_NO_GOVERNING_LAW, on=date(2025, 9, 1))
+    [line] = [r.getMessage() for r in caplog.records if r.name == "app.rules.api"]
+    assert line.startswith("rules review refused: NDA_GOVERNING_LAW_MISSING: no version in force on 2025-09-01")
+
+
 def test_reviews_endpoint_reports_a_gap_loudly(client, logged_in, rules_dir):
     write_rules(rules_dir, v1={"version": 1, "effective_to": "2025-06-30"},
                 v2={"version": 2, "effective_from": "2026-01-01"})

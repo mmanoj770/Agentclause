@@ -75,7 +75,11 @@ async def run_review(contract_text: str, contract_type_id: str, *, strict: bool 
     """
     day = evaluation_date(on, effective_date)
     contract_type = contract_type_id.strip().lower()
-    selection = _rules(strict, day, contract_type)
+    try:
+        selection = _rules(strict, day, contract_type)
+    except RuleGapError as e:
+        log.error("rules review refused: %s", e)
+        raise
     skipped = list(selection.skipped)
     rule_status = {r.versioned_id: r.verification_status for r in selection.rules}
     rule_findings = [ReviewFinding(**f.model_dump(), verification_status=rule_status[f.rule_applied])

@@ -100,7 +100,9 @@ For the evaluation date, each `rule_id` falls in exactly one case:
 | A version is in force | It runs (in strict mode, only if verified) |
 | The date is before the first version's `effective_from` | Skipped as `not_yet_in_force`: the rule didn't exist yet |
 | The date is after the last version's `effective_to` | Skipped as `no_longer_in_force`: the rule was retired |
-| The date is between one version's `effective_to` and the next one's `effective_from` | **`RuleGapError`**, naming the rule, the date and both versions. A gap is a mistake in the files, so the whole review fails rather than run with the rule silently missing |
+| The date is between one version's `effective_to` and the next one's `effective_from` | **`RuleGapError`**, naming the rule, the date and both versions. A gap is a mistake in the files, so the whole review fails rather than run with the rule silently missing. The error is logged at ERROR level before it is raised |
+
+A gap can't reach a review unnoticed: `test_shipped_rule_files_have_no_gaps` runs `RuleLoader.gaps()`, which checks every pair of consecutive versions whatever the date, and fails as soon as an edit leaves a day uncovered. When you end a version, the next one must start on the following day.
 
 ### Skipped rules
 

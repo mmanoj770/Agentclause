@@ -254,6 +254,24 @@ class RuleLoader:
                     raise RuleError(f"{name}: superseded_by names unknown rule {rule.superseded_by}")
         return [rule for entries in versions.values() for rule, _ in entries]
 
+    def gaps(self) -> list[str]:
+        """Every gap between consecutive versions of a rule, whatever the date. Empty means none.
+
+        select() only raises RuleGapError when the evaluation date falls in a gap; this finds them all,
+        so a test over the shipped files catches a gap the day it is introduced.
+        """
+        by_id: dict[str, list[Rule]] = {}
+        for rule in self.load_all():
+            by_id.setdefault(rule.rule_id, []).append(rule)
+        found = []
+        for rule_id, versions in sorted(by_id.items()):
+            versions.sort(key=lambda r: r.effective_from)
+            for before, after in zip(versions, versions[1:]):
+                if before.effective_to is not None and (after.effective_from - before.effective_to).days > 1:
+                    found.append(f"{rule_id}: {before.versioned_id} ends {before.effective_to.isoformat()} but "
+                                 f"{after.versioned_id} starts {after.effective_from.isoformat()}")
+        return found
+
     def load(self) -> list[Rule]:
         return list(self.select().rules)
 

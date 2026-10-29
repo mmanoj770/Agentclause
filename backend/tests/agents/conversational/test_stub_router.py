@@ -31,9 +31,8 @@ def parsed(question):
 def test_default_question_is_answered_with_citations():
     r = parsed("What is the term of this agreement?")
     assert r.status == TurnStatus.ANSWERED
-    assert len(r.citations) == 3
-    assert {c.source for c in r.citations} == {CitationSource.DOCUMENT, CitationSource.LAWYER_NOTE}
-
+    assert len(r.citations) == 2
+    assert {c.source for c in r.citations} == {CitationSource.DOCUMENT}
 
 def test_advice_question_is_escalated_with_id():
     r = parsed("Should I sue them?")

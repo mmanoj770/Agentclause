@@ -47,6 +47,7 @@ changing `default_corpus()`; nothing else needs to move.
 Parsing is strict on purpose: ASCII only, one exact shape per type, no trailing text. A citation that
 is "close" is blocked, not guessed at.
 """
+import hashlib
 import json
 import logging
 import re
@@ -389,8 +390,15 @@ def _block_details(b: BlockedFinding, corpus: Corpus) -> dict:
     }
 
 
+def _short_hash(text) -> str | None:
+    """A short SHA-256 of a citation: repeated blocks can be matched, and no contents reach the log."""
+    if not text:
+        return None
+    return hashlib.sha256(str(text).encode("utf-8")).hexdigest()[:12]
+
+
 def _block_log_facts(b: BlockedFinding, corpus: Corpus) -> dict:
-    """What the application log may hold about a block: ids and codes only.
+    """What the application log may hold about a block: ids, codes and a short hash of the citation.
 
     The audit row keeps the payload, citation and detail. The application log never does: they can
     carry contract text (a clause quoted in a description, a citation or a detail echoing it), and
@@ -402,6 +410,7 @@ def _block_log_facts(b: BlockedFinding, corpus: Corpus) -> dict:
         "layer": getattr(getattr(f, "layer", None), "name", None),
         "rule_applied": getattr(f, "rule_applied", None),
         "citation_type": getattr(getattr(f, "citation_type", None), "value", None),
+        "citation_sha256": _short_hash(getattr(f, "citation", None)),
         "reason": b.reason.value, "corpus_is_stub": corpus.is_stub,
     }
 

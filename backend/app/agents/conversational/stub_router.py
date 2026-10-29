@@ -27,8 +27,7 @@ UNANSWERABLE_WORDS = {"liability", "indemnity", "payment", "non-compete", "force
 
 SAMPLE_ANSWER = (
     "The term of this agreement is five years from the effective date. "
-    "Your confidentiality obligations continue for ten years after the term ends. "
-    "Your advocate noted that this period is standard for this type of agreement."
+    "Your confidentiality obligations continue for ten years after the term ends."
 )
 SAMPLE_CITATIONS = [
     Citation(
@@ -44,13 +43,6 @@ SAMPLE_CITATIONS = [
         clause_number="5",
         heading="Confidentiality Period",
         snippet="For the term of this Agreement and Ten (10) years thereafter.",
-    ),
-    Citation(
-        source=CitationSource.LAWYER_NOTE,
-        chunk_id="stub:note:0",
-        clause_number=None,
-        heading="Lawyer note",
-        snippet="Sample advocate note: the ten year period is acceptable.",
     ),
 ]
 

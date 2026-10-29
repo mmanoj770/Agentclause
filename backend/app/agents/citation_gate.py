@@ -389,15 +389,34 @@ def _block_details(b: BlockedFinding, corpus: Corpus) -> dict:
     }
 
 
+def _block_log_facts(b: BlockedFinding, corpus: Corpus) -> dict:
+    """What the application log may hold about a block: ids and codes only.
+
+    The audit row keeps the payload, citation and detail. The application log never does: they can
+    carry contract text (a clause quoted in a description, a citation or a detail echoing it), and
+    the log is read and shipped with less care than audit_logs.
+    """
+    f = b.finding
+    return {
+        "finding_id": str(getattr(f, "finding_id", None)),
+        "layer": getattr(getattr(f, "layer", None), "name", None),
+        "rule_applied": getattr(f, "rule_applied", None),
+        "citation_type": getattr(getattr(f, "citation_type", None), "value", None),
+        "reason": b.reason.value, "corpus_is_stub": corpus.is_stub,
+    }
+
+
 def log_blocks(document_id, blocked: list[BlockedFinding], corpus: Corpus,
                audit_conn: Callable | None = None) -> None:
     rows = [dict(document_id=document_id, action="citation_blocked", details=_block_details(b, corpus))
             for b in blocked]
     try:
         _write_audit_rows(rows, audit_conn)
-    except Exception:
-        log.exception("citation_blocked audit write failed; blocks follow: %s",
-                      json.dumps([r["details"] for r in rows], default=str))
+    except Exception as e:
+        # No traceback: a database error can echo the row it failed on, payload included.
+        log.error("citation_blocked audit write failed (%s); document_id=%s blocks=%s",
+                  type(e).__name__, document_id,
+                  json.dumps([_block_log_facts(b, corpus) for b in blocked], default=str))
 
 
 def log_abort(document_id, error: Exception, audit_conn: Callable | None = None) -> None:
@@ -405,9 +424,10 @@ def log_abort(document_id, error: Exception, audit_conn: Callable | None = None)
     try:
         _write_audit_rows([dict(document_id=document_id, action="citation_gate_aborted",
                                 details=details)], audit_conn)
-    except Exception:
-        log.exception("citation_gate_aborted audit write failed; document_id=%s details=%s",
-                      document_id, json.dumps(details))
+    except Exception as e:
+        # The error text stays in the audit row only; the log gets its type, as for blocks.
+        log.error("citation_gate_aborted audit write failed (%s); document_id=%s reason=%s error_type=%s",
+                  type(e).__name__, document_id, details["reason"], type(error).__name__)
 
 
 def screen_findings(findings: list[Finding], document_id, *, corpus: Corpus | None = None,

@@ -1,0 +1,17 @@
+{
+  "status": "PLACEHOLDER",
+  "note": "PLACEHOLDER values, invented by a developer to make the code testable. Not set or checked by a lawyer. While status is PLACEHOLDER, every risk-asymmetry finding is capped at LOW severity.",
+  "weights": {
+    "termination": 3.0,
+    "indemnity": 3.0,
+    "uncapped_indemnity": 2.0,
+    "liability_cap": 2.0,
+    "restriction": 1.0,
+    "right": 0.25,
+    "obligation": 0.25
+  },
+  "finding_threshold": 3.0,
+  "high_severity_threshold": 5.0,
+  "max_score": 10.0,
+  "baselines_file": null
+}

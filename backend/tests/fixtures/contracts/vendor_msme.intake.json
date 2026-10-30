@@ -1,0 +1,9 @@
+{
+  "is_contract": true,
+  "parties": ["Elm Example Components Private Limited", "Fern Example Grid Systems Private Limited"],
+  "execution_date": "2026-10-01",
+  "effective_date": "2026-10-01",
+  "document_type": "vendor_supplier",
+  "jurisdiction": "India",
+  "clauses": ["remuneration", "termination", "governing_law", "dispute_resolution", "other"]
+}

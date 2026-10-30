@@ -1,0 +1,24 @@
+{
+  "contract_type": "nda",
+  "planted_defects": [
+    {"defect": "No governing law clause", "rule_id": "NDA_GOVERNING_LAW_MISSING"},
+    {"defect": "No return or destruction clause", "rule_id": "NDA_RETURN_DESTRUCTION_MISSING"},
+    {"defect": "5-year all-India non-compete (clause 6)", "rule_id": "ICA_S27_RESTRAINT_OF_TRADE"},
+    {"defect": "Penalty / liquidated damages for breach (clause 7)", "rule_id": "ICA_S74_PENALTY_OR_LIQUIDATED_DAMAGES"}
+  ],
+  "demo": [
+    {"rule_applied": "ICA_S27_RESTRAINT_OF_TRADE@1", "layer": "STATUTORY", "severity": "low"},
+    {"rule_applied": "ICA_S74_PENALTY_OR_LIQUIDATED_DAMAGES@1", "layer": "STATUTORY", "severity": "low"},
+    {"rule_applied": "NDA_GOVERNING_LAW_MISSING@1", "layer": "COMPLETENESS", "severity": "low"},
+    {"rule_applied": "NDA_RETURN_DESTRUCTION_MISSING", "layer": "COMPLETENESS", "severity": "low"}
+  ],
+  "strict": [],
+  "layers": {
+    "R3_completeness": ["NDA_GOVERNING_LAW_MISSING", "NDA_RETURN_DESTRUCTION_MISSING"],
+    "R4_R5_rules": ["ICA_S27_RESTRAINT_OF_TRADE@1", "ICA_S74_PENALTY_OR_LIQUIDATED_DAMAGES@1", "NDA_GOVERNING_LAW_MISSING@1"]
+  },
+  "gate_blocked_known_gaps": [
+    {"rule_applied": "NDA_GOVERNING_LAW_MISSING@1", "reason": "malformed", "gap": "R8 #1: internal citation format"},
+    {"rule_applied": "NDA_RETURN_DESTRUCTION_MISSING", "reason": "malformed", "gap": "R8 #1: internal citation format"}
+  ]
+}

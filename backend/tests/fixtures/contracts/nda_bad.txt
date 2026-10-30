@@ -1,0 +1,20 @@
+MUTUAL NON-DISCLOSURE AGREEMENT
+
+This Agreement is made on 1 September 2026 between Aster Example Technologies Private Limited ("Aster") and Bramble Example Labs Private Limited ("Bramble"). Each of them may disclose information to the other.
+
+1. Definitions. "Confidential Information" means all business, technical and financial information disclosed by either party to the other, in any form, that is marked confidential or would reasonably be understood to be confidential.
+
+2. Exclusions. Confidential Information does not include information that is in the public domain, that the Receiving Party already lawfully held, or that it develops independently.
+
+3. Obligations of the Receiving Party. The Receiving Party shall keep the Confidential Information confidential, shall use it only to evaluate a possible business relationship between the parties, and shall not disclose it to any third party without the Disclosing Party's written consent.
+
+4. Term. This Agreement shall remain in force for a period of two years from the date above.
+
+5. Residuals. Nothing in this Agreement restricts either party from using general skills and know-how retained in the unaided memory of its employees (residuals).
+
+6. Non-Compete. For five years after this Agreement ends, Bramble shall not engage in any business anywhere in India that competes with the business of Aster.
+
+7. Breach. If Bramble breaches clause 6, it shall pay Aster liquidated damages of INR 50,00,000 by way of penalty.
+
+Signed for Aster Example Technologies Private Limited
+Signed for Bramble Example Labs Private Limited

@@ -1,0 +1,20 @@
+MUTUAL NON-DISCLOSURE AGREEMENT
+
+This Agreement is made on 15 August 2026 between Cedar Example Software Private Limited ("Cedar") and Dahlia Example Robotics Private Limited ("Dahlia"). Each of them may disclose information to the other.
+
+1. Definitions. "Confidential Information" means all business, technical and financial information disclosed by either party to the other, in any form, that is marked confidential or would reasonably be understood to be confidential.
+
+2. Exclusions. Confidential Information does not include information that is in the public domain, that the Receiving Party already lawfully held, or that it develops independently.
+
+3. Obligations of the Receiving Party. The Receiving Party shall keep the Confidential Information confidential, shall use it only to evaluate a possible business relationship between the parties, and shall not disclose it to any third party without the Disclosing Party's written consent.
+
+4. Term. This Agreement shall remain in force for a period of three years from the date above. The obligations in clause 3 shall survive its expiry for a further two years.
+
+5. Return of Information. Within fifteen days of a written request, the Receiving Party shall return or destroy all Confidential Information and confirm in writing that it has done so.
+
+6. Residuals. Nothing in this Agreement restricts either party from using general skills and know-how retained in the unaided memory of its employees (residuals).
+
+7. Governing Law and Jurisdiction. This Agreement is governed by the laws of India, and the courts at Bengaluru have exclusive jurisdiction over any dispute arising from it.
+
+Signed for Cedar Example Software Private Limited
+Signed for Dahlia Example Robotics Private Limited

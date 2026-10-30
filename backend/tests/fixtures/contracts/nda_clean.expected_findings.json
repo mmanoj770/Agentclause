@@ -1,0 +1,11 @@
+{
+  "contract_type": "nda",
+  "planted_defects": [],
+  "demo": [],
+  "strict": [],
+  "layers": {
+    "R3_completeness": [],
+    "R4_R5_rules": []
+  },
+  "gate_blocked_known_gaps": []
+}

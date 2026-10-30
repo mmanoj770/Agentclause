@@ -57,5 +57,5 @@ Remember while you do it:
 
 ## What is not covered yet
 
-- **The DB-backed pipeline (R10).** `app.pipeline.runner` doesn't exist yet, so `test_full_pipeline_saves_exactly_the_expected_findings` is skipped. When R10 lands, it should save the findings in `strict` that pass the gate, and end in `pending_lawyer_review`.
-- **R6, R7, R9.** No code yet, so no layer tests.
+- **The R10 pipeline on a real database.** `test_full_pipeline_saves_exactly_the_expected_strict_findings` runs `app.pipeline.runner.run_pipeline` on the in-memory database in `tests/pipeline_fakes.py`. `scripts/dry_run.py` covers live.
+- **R6, R7 and R9 on these fixtures.** They have their own tests (`test_consistency.py`, `test_risk_asymmetry.py`, `test_triage.py`). Their configs are placeholders, so in strict mode they add no findings here.

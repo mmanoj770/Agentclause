@@ -86,6 +86,11 @@ def download_name(key: str) -> str:
     return _UUID_PREFIX.sub("", key.rsplit("/", 1)[-1]) or "file"
 
 
+def read_object(s3, key: str) -> bytes:
+    """The stored file's bytes, for server-side processing (the review pipeline reads contracts this way)."""
+    return s3.get_object(Bucket=settings.s3_bucket, Key=key)["Body"].read()
+
+
 def create_download(s3, key: str) -> str:
     return s3.generate_presigned_url(
         "get_object",

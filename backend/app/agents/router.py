@@ -6,10 +6,11 @@ from datetime import date
 from typing import Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, BackgroundTasks, Depends
 from pydantic import BaseModel, Field
 
 from app.agents import service
+from app.pipeline import runner
 from app.auth.dependencies import CurrentUser, get_current_user, require_role
 from app.db import get_conn
 
@@ -45,9 +46,14 @@ class DraftRequest(BaseModel):
     mutual: bool = True
 
 
-@router.post("/review")
-def review(doc_id: UUID, user: CurrentUser = Depends(startup_only), conn=Depends(get_conn)):
-    return service.run_review(conn, user, doc_id)
+@router.post("/review", status_code=202)
+def review(doc_id: UUID, background: BackgroundTasks, user: CurrentUser = Depends(startup_only),
+           conn=Depends(get_conn)):
+    """Start the AI review (R10). It runs in the background; poll GET /documents/{id} for the state:
+    pending_lawyer_review when it finished, back to the starting state if it failed."""
+    started = runner.start_review(conn, user, doc_id)
+    background.add_task(runner.run_pipeline, doc_id, started["version_id"], started["from_state"])
+    return {"state": started["state"], "version_no": started["version_no"]}
 
 
 @router.post("/chat", response_model=ChatResponse)

@@ -276,33 +276,39 @@ def agent_stub_check(client, auth_a: dict, doc_id: str, ctx: dict) -> None:
     audits_before = len(audit_rows(doc_id))
 
     r = client.post(f"/documents/{doc_id}/review", headers=auth_a)
-    body = r.json() if r.status_code == 200 else {}
-    created = body.get("findings_created") or 0
-    if not report("9", "review -> 200, pending_lawyer_review, findings_created > 0",
-                  r.status_code == 200 and body.get("state") == "pending_lawyer_review" and created > 0,
-                  api_detail(r) if r.status_code != 200 else f"findings_created {created}"):
+    if not report("9", "review -> 202, under_ai_review", r.status_code == 202
+                  and r.json().get("state") == "under_ai_review", api_detail(r)):
         return  # a rejection is reported as is; nothing is worked around
+    # The R10 pipeline runs in the background: poll until it leaves under_ai_review.
+    state, waited = "under_ai_review", 0
+    while state == "under_ai_review" and waited < 180:
+        time.sleep(1)
+        waited += 1
+        state = db_rows("select state from documents where id = %s", (doc_id,))[0]["state"]
+    new = audit_rows(doc_id)[audits_before:]
+    failed = [a for a in new if a["action"] == "ai_review_failed"]
+    if not report("9", "pipeline finished: pending_lawyer_review", state == "pending_lawyer_review",
+                  f"state {state} after {waited}s" + (f"; failed in {failed[-1]['details'].get('layer')} "
+                                                      f"({failed[-1]['details'].get('error_type')})" if failed else "")):
+        return
+    found = [a for a in new if a["action"] == "findings_created"]
+    created = found[0]["details"].get("count", 0) if found else 0
 
     rows = db_rows("select document_id, document_version_id from findings where document_id = %s", (doc_id,))
-    report("9", "findings rows: count matches, right document and version",
+    report("9", "findings rows: count matches, right document and version (0 while every rule is unverified)",
            len(rows) == created and all(str(f["document_id"]) == doc_id and
                                         f["document_version_id"] == version["id"] for f in rows),
            f"{len(rows)} row(s)")
-    new = audit_rows(doc_id)[audits_before:]
-    found = [a for a in new if a["action"] == "findings_created"]
     moves = [a for a in new if a["action"] == "state_change"]
-    sys_rows = all(a["actor_id"] is None and a["actor_role"] == "system" for a in found + moves)
-    report("9", "audit: one findings_created + two state_change, all actor_id NULL / role 'system'",
-           len(found) == 1 and len(moves) == 2 and sys_rows,
+    tiers = [a for a in new if a["action"] == "triage_assigned"]
+    sys_rows = all(a["actor_id"] is None and a["actor_role"] == "system" for a in found + moves + tiers)
+    report("9", "audit: one findings_created, one triage_assigned, two state_change, all actor_id NULL / role 'system'",
+           len(found) == 1 and len(tiers) == 1 and len(moves) == 2 and sys_rows,
            "new actions: " + ", ".join(a["action"] for a in new))
-    report("9", "audit: findings_created count matches",
-           len(found) == 1 and found[0]["details"].get("count") == created)
     report("9", "audit: state changes are drafted->under_ai_review->pending_lawyer_review",
            [(m["details"].get("from"), m["details"].get("to")) for m in moves] ==
            [("drafted", "under_ai_review"), ("under_ai_review", "pending_lawyer_review")],
            str([(m["details"].get("from"), m["details"].get("to")) for m in moves]))
-    state = db_rows("select state from documents where id = %s", (doc_id,))[0]["state"]
-    report("9", "final state is pending_lawyer_review", state == "pending_lawyer_review", f"state {state}")
 
     before = finding_count()
     r = client.post(f"/documents/{doc_id}/review", headers=auth_a)

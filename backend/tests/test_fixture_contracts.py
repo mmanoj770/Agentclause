@@ -5,9 +5,9 @@ Each fixture in tests/fixtures/contracts/ is three files (see the README there):
   <name>.intake.json              the intake LLM's canned output, so no real API is called
   <name>.expected_findings.json   every finding expected in demo mode and in strict mode, per layer
 
-The chain tested here is the pipeline as far as it exists: R2 intake (mocked LLM) -> R3 completeness ->
-R4/R5 rules, through run_review(), then the R8 gate on its own. The DB-backed pipeline (R10,
-app.pipeline.runner) does not exist yet; its tests are at the bottom, skipped until it does.
+The chain tested here: R2 intake (mocked LLM) -> R3 completeness -> R4/R5 rules through run_review(),
+each layer on its own, and at the bottom the whole R10 pipeline (app.pipeline.runner) on an in-memory
+database.
 """
 import asyncio
 import json
@@ -178,13 +178,29 @@ def test_layer_r8_citation_gate(name):
 
 # --- the DB-backed pipeline (R10) -------------------------------------------------------------
 
-_NO_RUNNER = "needs app.pipeline.runner.run_pipeline from pipeline-r10, which is not built yet"
-
-
-@pytest.mark.skip(reason=_NO_RUNNER)
 @pytest.mark.parametrize("name", FIXTURES)
-def test_full_pipeline_saves_exactly_the_expected_findings(name):
-    """TODO(R10): run run_pipeline(document_id, version_id) with the canned intake LLM and a mocked
-    database, then assert: the saved agent findings equal what passes the gate out of
-    expected["strict"] (production runs strict); the document ends in pending_lawyer_review; a
-    second run replaces the version's agent findings and keeps lawyer-added ones."""
+def test_full_pipeline_saves_exactly_the_expected_strict_findings(name, monkeypatch):
+    """R10 end to end with the canned intake LLM and an in-memory database: the saved agent findings are
+    exactly expected["strict"] (production runs strict), the document ends in pending_lawyer_review, and a
+    second run saves the same findings again, without duplicates."""
+    from app.agents import citation_gate
+    from app.pipeline import runner
+    from tests.pipeline_fakes import FakeDB, GateAudit, canned_normalise, connection_to, fake_transition
+
+    expected = load(name)[2]
+    db = FakeDB(doc_type=expected["contract_type"])
+    monkeypatch.setattr(runner, "transition", fake_transition(db))
+    monkeypatch.setattr(citation_gate, "_pool_connection", GateAudit().connection)
+    deps = runner.PipelineDeps(load_text=lambda conn, d, v: (CONTRACTS / f"{name}.txt").read_text(),
+                               normalise=canned_normalise(name), our_side=lambda conn, d, doc: None)
+
+    def saved_after_a_run():
+        db.doc["state"] = "under_ai_review"
+        result = runner.run_pipeline(db.doc["id"], db.version_id, "drafted", deps=deps,
+                                     connection=lambda: connection_to(db))
+        assert result["outcome"] == "pending_lawyer_review" and db.doc["state"] == "pending_lawyer_review"
+        return sorted(f["rule_applied"] for f in db.agent_findings())
+
+    want = sorted(e["rule_applied"] for e in expected["strict"])
+    assert saved_after_a_run() == want
+    assert saved_after_a_run() == want

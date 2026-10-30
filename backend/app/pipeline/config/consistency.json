@@ -1,0 +1,11 @@
+{
+  "status": "PLACEHOLDER",
+  "note": "PLACEHOLDER severities, invented by a developer to make the code testable. Not set or checked by a lawyer. While status is PLACEHOLDER, every consistency finding is capped at LOW severity.",
+  "severity": {
+    "governing_law": "high",
+    "jurisdiction": "high",
+    "payment_period": "medium",
+    "termination_notice": "medium",
+    "agreement_term": "medium"
+  }
+}

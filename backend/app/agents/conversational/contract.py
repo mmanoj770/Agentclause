@@ -17,6 +17,7 @@ class ReasonCode(str, Enum):
     UNSUPPORTED_BY_SOURCE = "unsupported_by_source"
     OUT_OF_SCOPE = "out_of_scope"
     DOCUMENT_NOT_READY = "document_not_ready"
+    TEMPORARILY_UNAVAILABLE = "temporarily_unavailable"
 
 
 class CitationSource(str, Enum):

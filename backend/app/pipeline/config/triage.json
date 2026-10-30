@@ -1,0 +1,15 @@
+{
+  "status": "PLACEHOLDER",
+  "note": "PLACEHOLDER values, invented by a developer to make the code testable. Not set or checked by a lawyer. Do not route real documents on them until an advocate signs off the weights and thresholds.",
+  "severity_weights": {
+    "critical": 5.0,
+    "high": 3.0,
+    "medium": 1.0,
+    "low": 0.25
+  },
+  "asymmetry_weight": 1.0,
+  "thresholds": {
+    "enhanced": 4.0,
+    "senior_counsel": 10.0
+  }
+}

@@ -17,8 +17,5 @@
     "R3_completeness": ["NDA_GOVERNING_LAW_MISSING", "NDA_RETURN_DESTRUCTION_MISSING"],
     "R4_R5_rules": ["ICA_S27_RESTRAINT_OF_TRADE@1", "ICA_S74_PENALTY_OR_LIQUIDATED_DAMAGES@1", "NDA_GOVERNING_LAW_MISSING@1"]
   },
-  "gate_blocked_known_gaps": [
-    {"rule_applied": "NDA_GOVERNING_LAW_MISSING@1", "reason": "malformed", "gap": "R8 #1: internal citation format"},
-    {"rule_applied": "NDA_RETURN_DESTRUCTION_MISSING", "reason": "malformed", "gap": "R8 #1: internal citation format"}
-  ]
+  "gate_blocked_known_gaps": []
 }

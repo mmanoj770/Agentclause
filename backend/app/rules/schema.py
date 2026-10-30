@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
-from app.rules.clauses import CLAUSES
+from app.rules.clauses import CLAUSES, internal_citation
 from app.schemas.finding import CitationType, Severity
 
 INTERNAL = "Internal"
@@ -139,14 +139,25 @@ class Rule(BaseModel):
                                  "(or be 'Internal')")
             if not _SECTION.match(self.section):
                 raise ValueError("section must be a section number like '27' or '73(1)' for a statute")
+        elif parse_condition(self.condition)[0] != "missing_clause":
+            # The gate resolves an internal citation only against a required-clause entry (Layer 1).
+            raise ValueError("an Internal rule must use missing_clause(...): it cites the required-clause entry")
         return self
+
+    def citation_for(self, contract_type: str) -> str:
+        """The finding's citation for a contract of this type, in the shape the Layer 5 gate resolves:
+        "<Act>, <year>, s. <n>" for a statute, "Internal: Schema <type>/<entry>" for an Internal rule."""
+        if self.statute == INTERNAL:
+            return internal_citation(contract_type, parse_condition(self.condition)[1][0])
+        return f"{self.statute}, s. {self.section}"
 
     @property
     def citation(self) -> str:
-        """The finding's citation, shaped so migration 18 classifies it (STATUTORY or INTERNAL_BASELINE)."""
+        """A statutory rule's citation, which doesn't depend on the contract type. Internal rules: citation_for()."""
         if self.statute == INTERNAL:
-            return f"Internal: {self.section}"
-        return f"{self.statute}, s. {self.section}"
+            raise ValueError(f"{self.rule_id}: an Internal rule's citation depends on the contract type; "
+                             "use citation_for(contract_type)")
+        return self.citation_for("")
 
     @property
     def citation_type(self) -> CitationType:

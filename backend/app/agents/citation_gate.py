@@ -130,9 +130,13 @@ STUB_STATUTES: Mapping[tuple[str, int, str], str] = {
 
 # Required-clause schema (Layer 1) and risk baselines (Layer 4). Invented placeholders for the demo, NOT
 # lawyer-verified. Entry ids only; no text. There is no real baseline dataset yet.
+# The NDA entries include the 8 required clauses of app/rules/config/nda_required_clauses.json, in the
+# rules engine's names (clause id with "_"), so its completeness findings resolve here.
 STUB_SCHEMA_ENTRIES: Mapping[str, frozenset[str]] = {
     "nda": frozenset({"definition", "confidentiality", "term", "governing_law", "dispute_resolution",
-                      "indemnity", "return_of_information"}),
+                      "indemnity", "return_of_information",
+                      "confidential_info_definition", "obligations", "exclusions", "return_destruction",
+                      "residuals"}),
 }
 STUB_BASELINES: Mapping[str, str] = {
     "liability-cap": "stub:baseline-liability-cap",

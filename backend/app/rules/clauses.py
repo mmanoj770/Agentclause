@@ -58,6 +58,17 @@ CLAUSES: dict[str, Clause] = {
 }
 
 
+def schema_entry(clause_id: str) -> str:
+    """The Layer 5 gate's Layer 1 entry name for a clause id: "governing-law" -> "governing_law"."""
+    return clause_id.replace("-", "_")
+
+
+def internal_citation(contract_type: str, clause_id: str) -> str:
+    """The citation a completeness finding carries, in the shape the Layer 5 gate resolves on Layer 1:
+    "Internal: Schema nda/governing_law" (citation_gate._INTERNAL_SCHEMA)."""
+    return f"Internal: Schema {contract_type}/{schema_entry(clause_id)}"
+
+
 def normalise(text: str) -> str:
     """Lower-case and collapse whitespace so patterns match across line breaks."""
     return re.sub(r"\s+", " ", text).strip().lower()

@@ -67,7 +67,7 @@ class RuleEvaluator:
                 continue
             clause_reference = self._fires(rule, text, normalised)
             if clause_reference is not None:
-                findings.append(self._finding(rule, clause_reference))
+                findings.append(self._finding(rule, clause_reference, contract_type))
         return findings
 
     @staticmethod
@@ -88,7 +88,7 @@ class RuleEvaluator:
         return None
 
     @staticmethod
-    def _finding(rule: Rule, clause_reference: str) -> Finding:
+    def _finding(rule: Rule, clause_reference: str, contract_type: str) -> Finding:
         name, args = parse_condition(rule.condition)
         if rule.description:
             description = rule.description
@@ -103,6 +103,6 @@ class RuleEvaluator:
             description=description,
             rule_applied=rule.versioned_id,
             remedy_suggested=rule.remedy_suggested,
-            citation=rule.citation,
+            citation=rule.citation_for(contract_type),
             citation_type=rule.citation_type,
         )

@@ -29,7 +29,7 @@ The test picks up every `*.txt` file automatically. Then update the fixture list
     "R4_R5_rules": ["NDA_GOVERNING_LAW_MISSING@1"]
   },
   "gate_blocked_known_gaps": [
-    {"rule_applied": "NDA_GOVERNING_LAW_MISSING@1", "reason": "malformed", "gap": "R8 #1: internal citation format"}
+    {"rule_applied": "ICA_S28_RESTRAINT_OF_LEGAL_PROCEEDINGS@1", "reason": "not_in_corpus", "gap": "no s.28 in the stub corpus"}
   ]
 }
 ```

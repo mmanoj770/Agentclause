@@ -64,7 +64,27 @@ def review(text, contract_type="nda", **kw):
 def test_valid_rule_loads():
     r = rule()
     assert r.severity is Severity.HIGH and not r.verified
-    assert r.citation == "Internal: NDA baseline, governing law"
+    assert r.citation_for("nda") == "Internal: Schema nda/governing_law"
+    with pytest.raises(ValueError, match="citation_for"):
+        r.citation                                          # an Internal citation depends on the contract type
+
+
+def test_an_internal_rule_must_be_a_missing_clause_rule():
+    with pytest.raises(RuleError, match="missing_clause"):
+        rule(condition="contains_text('anything')")
+
+
+def test_completeness_and_internal_rule_findings_pass_the_layer_5_gate():
+    from app.agents.citation_gate import STUB_SCHEMA_ENTRIES, DocumentContext, StubFixtureCorpus, check_finding
+    from app.rules.clauses import schema_entry
+    # Every required clause in the completeness config has an entry the gate knows.
+    assert {schema_entry(r.clause) for r in CompletenessChecker().config.required} <= STUB_SCHEMA_ENTRIES["nda"]
+    findings = asyncio.run(run_review("A bare page.", "nda", strict=False)).findings
+    internal = [f for f in findings if f.citation_type.value == "INTERNAL_BASELINE"]
+    assert len(internal) == 8
+    for f in internal:
+        assert f.citation.startswith("Internal: Schema nda/")
+        assert check_finding(f, StubFixtureCorpus(), DocumentContext("nda")).allowed, f.citation
 
 
 def test_statute_citation_matches_migration_18_pattern():

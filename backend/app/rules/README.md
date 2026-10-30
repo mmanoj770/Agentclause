@@ -60,9 +60,12 @@ One JSON object per file in `rules/`. Any malformed file stops loading with an e
 | `superseded_by` | Optional. `RULE_ID` or `RULE_ID@<version>` of the rule that replaces this one; must be a loaded rule |
 | `verification_status` | `verified` or `unverified` |
 
-The finding's citation is built from `statute` and `section`, shaped to pass migration 18's checks:
-- `"Indian Contract Act, 1872, s. 27"` is classified STATUTORY;
-- `"Internal: <section>"` is classified INTERNAL_BASELINE.
+The finding's citation is built in the shape the Layer 5 citation gate (`app/agents/citation_gate.py`) resolves:
+- **A statute rule:** `"Indian Contract Act, 1872, s. 27"`, from `statute` and `section`. It's STATUTORY, and the gate looks the section up in its corpus.
+- **An `Internal` rule:** `"Internal: Schema <contract type>/<entry>"`, e.g. `"Internal: Schema nda/governing_law"`. It's INTERNAL_BASELINE, and the gate looks the entry up in that contract type's required-clause schema.
+  - The entry is the rule's `missing_clause` id with `_` instead of `-`, so an `Internal` rule **must** use `missing_clause(...)`; any other condition is rejected.
+  - Its `section` is just a label for people.
+  - The completeness checker cites the same way.
 
 That's why a statute needs its year and a real section number. A label like "General practice" is rejected unless the statute is `Internal`.
 

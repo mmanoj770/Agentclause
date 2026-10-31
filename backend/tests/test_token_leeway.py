@@ -21,7 +21,7 @@ def es256(monkeypatch):
 
 def token(iat_offset=0, exp_offset=3600):
     now = int(time.time())
-    return jwt.encode({"sub": "u", "aud": "authenticated", "iat": now + iat_offset, "exp": now + exp_offset},
+    return jwt.encode({"sub": "u", "aud": "authenticated", "iss": dependencies._ISSUER, "iat": now + iat_offset, "exp": now + exp_offset},
                       _PRIVATE, algorithm="ES256")
 
 

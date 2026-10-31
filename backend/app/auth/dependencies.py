@@ -14,6 +14,11 @@ bearer = HTTPBearer(auto_error=False)
 CLOCK_SKEW_LEEWAY_SECONDS = 10
 _jwks = PyJWKClient(f"{settings.supabase_url}/auth/v1/.well-known/jwks.json")
 
+# The only algorithms accepted, pinned so any change shows up in review. Shared-secret (HS*) and "none" are never valid.
+ALLOWED_ALGORITHMS = ("ES256", "RS256")
+# Tokens must come from this project's auth service.
+_ISSUER = f"{settings.supabase_url.rstrip('/')}/auth/v1"
+
 @dataclass
 class CurrentUser:
     id: str
@@ -27,12 +32,11 @@ def _unauthorized(msg: str = "Invalid or missing token") -> HTTPException:
 def _decode(token: str) -> dict:
     try:
         alg = jwt.get_unverified_header(token).get("alg")
-        # Only asymmetric algorithms are accepted. HS256 (shared secret) is refused outright.
-        if alg not in ("ES256", "RS256"):
+        if alg not in ALLOWED_ALGORITHMS:
             raise _unauthorized()
         key = _jwks.get_signing_key_from_jwt(token).key
-        return jwt.decode(token, key, algorithms=[alg], audience="authenticated",
-                          leeway=CLOCK_SKEW_LEEWAY_SECONDS)
+        return jwt.decode(token, key, algorithms=[alg], audience="authenticated", issuer=_ISSUER,
+                          leeway=CLOCK_SKEW_LEEWAY_SECONDS, options={"require": ["exp", "iss", "aud"]})
     except jwt.PyJWTError:
         raise _unauthorized()
 

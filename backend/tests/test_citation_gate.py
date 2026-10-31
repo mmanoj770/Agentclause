@@ -1,4 +1,5 @@
 """Layer 5 citation gate: no database. Audit writes go to a fake connection factory."""
+import hashlib
 import logging
 import uuid
 from contextlib import contextmanager
@@ -246,7 +247,45 @@ def test_failed_block_log_falls_back_to_the_app_log_and_the_block_still_holds(ca
     with caplog.at_level(logging.ERROR, logger="citation_gate"):
         result, _ = screen([make("Fake Act, 2000, s. 1")], audit=AuditConn(fail=True))
     assert len(result.blocked) == 1 and not result.passed
-    assert "Fake Act, 2000, s. 1" in caplog.text
+    (blocked,) = result.blocked
+    assert str(blocked.finding.finding_id) in caplog.text and str(DOC) in caplog.text
+    assert blocked.reason.value in caplog.text and "TEST_RULE" in caplog.text
+    # A short hash of the citation lets repeated blocks be matched; the citation text is not logged.
+    assert hashlib.sha256(blocked.finding.citation.encode()).hexdigest()[:12] in caplog.text
+    assert "Fake Act" not in caplog.text
+
+
+# Contract text a finding can carry: none of it may reach the application log (R8 #10).
+CONTRACT_TEXT = "The Receiving Party shall not disclose SENTINEL-CLAUSE-TEXT to any third party"
+
+
+def test_contract_text_never_reaches_the_app_log_when_the_block_log_fails(caplog):
+    finding = make(f"Fake Act, 2000, s. 1 {CONTRACT_TEXT}").model_copy(update={
+        "clause_reference": f"Clause 4 {CONTRACT_TEXT}",
+        "description": f"Clause 4 reads: {CONTRACT_TEXT}",
+        "remedy_suggested": CONTRACT_TEXT,
+    })
+    with caplog.at_level(logging.DEBUG, logger="citation_gate"):
+        result, _ = screen([finding], audit=AuditConn(fail=True))
+    assert len(result.blocked) == 1
+    assert "citation_blocked audit write failed" in caplog.text
+    assert "SENTINEL-CLAUSE-TEXT" not in caplog.text
+    assert hashlib.sha256(finding.citation.encode()).hexdigest()[:12] in caplog.text
+    # Nor in a traceback or exception text attached to a record.
+    assert all(r.exc_info is None and r.exc_text is None for r in caplog.records)
+
+
+def test_contract_text_never_reaches_the_app_log_when_the_abort_log_fails(caplog):
+    class LeakyCorpus(StubFixtureCorpus):
+        def ensure_readable(self):
+            raise gate.CorpusUnavailable(f"could not read corpus near {CONTRACT_TEXT}")
+
+    with caplog.at_level(logging.DEBUG, logger="citation_gate"):
+        with pytest.raises(HTTPException):
+            gate.screen_findings([make("Indian Contract Act, 1872, s. 27")], DOC,
+                                 corpus=LeakyCorpus(statutes={}), audit_conn=AuditConn(fail=True).factory)
+    assert "citation_gate_aborted audit write failed" in caplog.text
+    assert "SENTINEL-CLAUSE-TEXT" not in caplog.text
 
 
 def test_the_gate_writes_nothing_to_the_callers_connection():

@@ -8,7 +8,6 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql://postgres:postgres@127.0.0.1:54322/postgres"
     supabase_url: str = "http://127.0.0.1:54321"
-    supabase_jwt_secret: str | None = None  # only needed for HS256 tokens
     # Comma-separated browser origins allowed by CORS (no "*"). Kept as a str because
     # pydantic-settings would parse a list[str] env var as JSON.
     cors_allowed_origins: str = "http://localhost:3000"

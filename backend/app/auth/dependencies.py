@@ -27,16 +27,11 @@ def _unauthorized(msg: str = "Invalid or missing token") -> HTTPException:
 def _decode(token: str) -> dict:
     try:
         alg = jwt.get_unverified_header(token).get("alg")
-        if alg == "HS256":
-            if not settings.supabase_jwt_secret:
-                raise HTTPException(500, "SUPABASE_JWT_SECRET is not configured")
-            key, algorithms = settings.supabase_jwt_secret, ["HS256"]
-        elif alg in ("ES256", "RS256"):
-            key, algorithms = _jwks.get_signing_key_from_jwt(token).key, [alg]
-        else:
+        # Only asymmetric algorithms are accepted. HS256 (shared secret) is refused outright.
+        if alg not in ("ES256", "RS256"):
             raise _unauthorized()
-        
-        return jwt.decode(token, key, algorithms=algorithms, audience="authenticated",
+        key = _jwks.get_signing_key_from_jwt(token).key
+        return jwt.decode(token, key, algorithms=[alg], audience="authenticated",
                           leeway=CLOCK_SKEW_LEEWAY_SECONDS)
     except jwt.PyJWTError:
         raise _unauthorized()

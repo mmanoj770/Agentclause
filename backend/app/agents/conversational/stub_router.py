@@ -97,6 +97,8 @@ def stub_response(document_id: UUID, question: str) -> ChatResponse:
         return _refused(document_id, ReasonCode.TEMPORARILY_UNAVAILABLE)
     if q.startswith("stub:notready"):
         return _refused(document_id, ReasonCode.DOCUMENT_NOT_READY)
+    if q.startswith("stub:unreadable"):
+        return _refused(document_id, ReasonCode.DOCUMENT_UNREADABLE)
 
     if matches_advice_rule(question):
         return _escalated(document_id)

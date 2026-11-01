@@ -71,4 +71,10 @@ def test_mismatched_document_rejected():
     with pytest.raises(ValueError):
         index.index_document(doc, chunks)
 
-       
+def test_remove_document_forgets_it():
+    index, doc_a, doc_b = build_index()
+    index.remove_document(doc_a)
+    assert not index.has_document(doc_a)
+    assert index.search(doc_a, "governing law") == []
+    assert index.has_document(doc_b)
+    index.remove_document(doc_a)

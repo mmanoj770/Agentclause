@@ -36,7 +36,6 @@ class AnthropicClient:
         )
         return "".join(b.text for b in message.content if b.type == "text")
 
-
 class GeminiClient:
     def __init__(self, model: str | None = None, api_key: str | None = None):
         from google import genai
@@ -45,7 +44,12 @@ class GeminiClient:
         if not key:
             raise RuntimeError("GEMINI_API_KEY is not set")
         self.client = genai.Client(api_key=key)
-        self.model = model or os.environ.get("GEMINI_MODEL", DEFAULT_GEMINI_MODEL)
+        self.model = (
+            model
+            or os.environ.get("GEMINI_MODEL")
+            or os.environ.get("GEMINI_GENERATION_MODEL")
+            or DEFAULT_GEMINI_MODEL
+        )
 
     def complete(self, system: str, user: str, max_tokens: int = 1000) -> str:
         from google.genai import types

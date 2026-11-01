@@ -60,6 +60,7 @@ def test_unanswerable_keyword_is_refused():
         ("stub:unrecorded", TurnStatus.ESCALATED, ReasonCode.ADVICE_REQUEST),
         ("stub:unavailable", TurnStatus.REFUSED, ReasonCode.TEMPORARILY_UNAVAILABLE),
         ("stub:notready", TurnStatus.REFUSED, ReasonCode.DOCUMENT_NOT_READY),
+        ("stub:unreadable", TurnStatus.REFUSED, ReasonCode.DOCUMENT_UNREADABLE),
     ],
 )
 def test_forced_states(phrase, status, reason):

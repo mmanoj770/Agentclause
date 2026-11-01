@@ -28,6 +28,10 @@ REFUSAL_TEXT: dict[ReasonCode, str] = {
     ReasonCode.TEMPORARILY_UNAVAILABLE: (
         "I couldn't process your question just now. Please try again in a moment."
     ),
+        ReasonCode.DOCUMENT_UNREADABLE: (
+        "I can't read this document yet. Scanned or image uploads can't be read by the chat, "
+        "so please ask your advocate about its contents."
+    ),
 }
 
 ESCALATION_RECORDED_TEXT = (

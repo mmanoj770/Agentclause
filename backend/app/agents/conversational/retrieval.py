@@ -20,8 +20,7 @@ def embedding_text(chunk: ClauseChunk) -> str:
 class DocumentIndex:
     def __init__(self, embedder: Embedder):
         self.embedder = embedder
-        self._chunks: dict[UUID, list[ClauseChunk]] = {}
-        self._vectors: dict[UUID, np.ndarray] = {}
+        self._docs: dict[UUID, tuple[list[ClauseChunk], np.ndarray]] = {}
 
     def index_document(
         self,
@@ -47,19 +46,21 @@ class DocumentIndex:
         if any(c.document_id != document_id for c in all_chunks):
             raise ValueError("chunk belongs to a different document")
 
-        self._chunks[document_id] = all_chunks
-        self._vectors[document_id] = self.embedder.embed(
-            [embedding_text(c) for c in all_chunks]
-        )
+        vectors = self.embedder.embed([embedding_text(c) for c in all_chunks])
+        self._docs[document_id] = (all_chunks, vectors)
 
     def search(self, document_id: UUID, query: str, k: int = 4) -> list[RetrievedChunk]:
-        chunks = self._chunks.get(document_id)
-        if not chunks:
+        entry = self._docs.get(document_id)
+        if not entry:
             return []
+        chunks, vectors = entry
         query_vector = self.embedder.embed([query])[0]
-        scores = self._vectors[document_id] @ query_vector
+        scores = vectors @ query_vector
         top = np.argsort(-scores)[:k]
         return [RetrievedChunk(chunk=chunks[i], score=float(scores[i])) for i in top]
 
     def has_document(self, document_id: UUID) -> bool:
-        return document_id in self._chunks
+        return document_id in self._docs
+
+    def remove_document(self, document_id: UUID) -> None:
+        self._docs.pop(document_id, None)

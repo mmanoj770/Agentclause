@@ -11,4 +11,4 @@ pypdf
 numpy
 sentence-transformers
 google-genai
-anthropic
+anthropic==2.3.0

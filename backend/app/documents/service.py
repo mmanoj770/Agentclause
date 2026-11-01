@@ -31,7 +31,7 @@ def _can_view(doc: dict, actor: Actor) -> bool:
 
 def create_document(conn, user: CurrentUser, doc_type: str,
                     state_of_execution: str | None, transaction_value: Decimal | None) -> dict:
-    if user.org_id is None:
+    if not user.org_id:
         raise HTTPException(400, "Your account is not linked to an organization yet")
     with conn.transaction():
         ct = conn.execute(
@@ -53,7 +53,7 @@ def create_document(conn, user: CurrentUser, doc_type: str,
 
 def list_documents(conn, user: CurrentUser) -> list[dict]:
     if user.role == STARTUP:
-        if user.org_id is None:
+        if not user.org_id:
             return []
         return conn.execute(
             "select * from documents where org_id = %s order by created_at desc", (user.org_id,)
@@ -89,6 +89,19 @@ def transition(conn, doc_id, to_state: DocState, actor: Actor, note: str | None 
         draft_flag = doc["draft_for_settlement"]
 
         if to_state == DocState.LAWYER_APPROVED:
+            open_count = conn.execute(
+                """select count(*) as n from findings f
+                   where f.document_id = %s
+                     and f.severity in ('high', 'critical')
+                     and f.advocate_action is null
+                     and f.document_version_id = (
+                       select id from document_versions
+                       where document_id = %s order by version_no desc limit 1)""",
+                (doc_id, doc_id),
+            ).fetchone()["n"]
+            if open_count:
+                raise HTTPException(
+                    409, f"{open_count} high/critical finding(s) still need your decision before sign-off")
             # Sign-off: the one legally accountable act
             signed = conn.execute(
                 """update lawyer_assignments set signed_off_at = now()

@@ -1,0 +1,9 @@
+{
+  "layer": "STATUTORY",
+  "severity": "critical",
+  "clause_reference": "Missing",
+  "description": "No governing-law clause, so the contract may be unenforceable in court.",
+  "rule_applied": "NDA_GOVERNING_LAW_MISSING",
+  "remedy_suggested": "Add a governing-law and jurisdiction clause.",
+  "citation": "Code of Civil Procedure, 1908, s. 20"
+}

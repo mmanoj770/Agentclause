@@ -23,3 +23,5 @@ supabase/.branches/
 .DS_Store
 .idea/
 .vscode/
+
+!.env.example

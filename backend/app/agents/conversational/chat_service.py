@@ -80,8 +80,8 @@ class _BoundEscalations:
 class ChatService:
     def __init__(
         self,
-        source: DocumentSource,
-        chat_log: ChatLog,
+        source: DocumentSource | None,
+        chat_log: ChatLog | None,
         index: DocumentIndex,
         llm: LLMClient,
         verifier: Verifier,
@@ -99,19 +99,38 @@ class ChatService:
         self._locks: dict[UUID, threading.Lock] = {}
         self._guard = threading.Lock()
 
-    def answer(self, user: ChatUser, document_id: UUID, question: str) -> ChatResponse:
+    def answer(
+        self,
+        user: ChatUser,
+        document_id: UUID,
+        question: str,
+        source: DocumentSource | None = None,
+        chat_log: ChatLog | None = None,
+    ) -> ChatResponse:
+        source = source if source is not None else self.source
+        chat_log = chat_log if chat_log is not None else self.log
+        if source is None or chat_log is None:
+            raise RuntimeError("a document source and a chat log are required")
+
         started = time.monotonic()
         request = ChatRequest(document_id=document_id, question=question)
-        info = self.source.load_document(document_id, user)
-        result = self._run(user, request, info)
-        self._record(user, info, request, result, started)
+        info = source.load_document(document_id, user)
+        result = self._run(user, request, info, source, chat_log)
+        self._record(chat_log, user, info, request, result, started)
         return result.response
 
-    def _run(self, user: ChatUser, request: ChatRequest, info: DocumentInfo) -> PipelineResult:
+    def _run(
+        self,
+        user: ChatUser,
+        request: ChatRequest,
+        info: DocumentInfo,
+        source: DocumentSource,
+        chat_log: ChatLog,
+    ) -> PipelineResult:
         if info.state not in CHAT_OPEN_STATES:
             return self._refusal(request, ReasonCode.DOCUMENT_NOT_READY, "state_closed")
         try:
-            self._ensure_indexed(info)
+            self._ensure_indexed(info, source)
         except UnreadableDocument:
             return self._refusal(request, ReasonCode.DOCUMENT_UNREADABLE, "unreadable")
         except Exception:
@@ -122,7 +141,7 @@ class ChatService:
             self.index,
             self.llm,
             self.verifier,
-            _BoundEscalations(self.log, user.id),
+            _BoundEscalations(chat_log, user.id),
             threshold=self.threshold,
         )
         return pipeline.ask(request)
@@ -137,7 +156,7 @@ class ChatService:
         with self._guard:
             return self._locks.setdefault(document_id, threading.Lock())
 
-    def _ensure_indexed(self, info: DocumentInfo) -> None:
+    def _ensure_indexed(self, info: DocumentInfo, source: DocumentSource) -> None:
         with self._doc_lock(info.document_id):
             with self._guard:
                 if self._versions.get(info.document_id) == info.version_id:
@@ -148,7 +167,7 @@ class ChatService:
             if Path(name).suffix.lower() not in READABLE_SUFFIXES:
                 raise UnreadableDocument(name)
 
-            data = self.source.read_file(info.storage_key)
+            data = source.read_file(info.storage_key)
             try:
                 chunks = ingest_contract(info.document_id, name, data)
             except ValueError as exc:
@@ -167,6 +186,7 @@ class ChatService:
 
     def _record(
         self,
+        chat_log: ChatLog,
         user: ChatUser,
         info: DocumentInfo,
         request: ChatRequest,
@@ -192,11 +212,11 @@ class ChatService:
             latency_ms=int((time.monotonic() - started) * 1000),
         )
         try:
-            self.log.save_turn(record)
+            chat_log.save_turn(record)
         except Exception:
             log.exception("could not save chat turn")
         try:
-            self.log.write_audit(
+            chat_log.write_audit(
                 r.document_id,
                 user,
                 "chat_turn",

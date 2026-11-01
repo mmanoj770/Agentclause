@@ -16,7 +16,7 @@ app = FastAPI(title="AgentClause API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.frontend_origin],
+    allow_origins=["http://localhost:3000"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -30,3 +30,13 @@ from app.documents.router import router as documents_router
 app.include_router(documents_router)
 from app.lawyer_queue.router import router as queue_router
 app.include_router(queue_router)
+
+import os
+
+from dotenv import load_dotenv
+
+load_dotenv()
+if os.environ.get("CHAT_STUB") == "1":
+    from app.agents.conversational.stub_router import router as chat_stub_router
+
+    app.include_router(chat_stub_router)

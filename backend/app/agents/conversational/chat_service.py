@@ -23,7 +23,7 @@ READABLE_SUFFIXES = frozenset({".pdf", ".docx", ".txt"})
 
 
 class ChatUser(BaseModel):
-    id: UUID
+    id: str
     role: str
 
 
@@ -39,7 +39,7 @@ class TurnRecord(BaseModel):
     turn_id: UUID
     document_id: UUID
     document_version_id: str | None
-    asked_by: UUID
+    asked_by: str
     question: str
     answer: str
     status: str
@@ -59,7 +59,7 @@ class DocumentSource(Protocol):
 
 
 class ChatLog(Protocol):
-    def save_escalation(self, document_id: UUID, question: str, asked_by: UUID) -> UUID: ...
+    def save_escalation(self, document_id: UUID, question: str, asked_by: str) -> UUID: ...
     def save_turn(self, record: TurnRecord) -> None: ...
     def write_audit(self, document_id: UUID, user: ChatUser, action: str, details: dict) -> None: ...
 
@@ -69,7 +69,7 @@ class UnreadableDocument(Exception):
 
 
 class _BoundEscalations:
-    def __init__(self, chat_log: ChatLog, asked_by: UUID):
+    def __init__(self, chat_log: ChatLog, asked_by: str):
         self.chat_log = chat_log
         self.asked_by = asked_by
 

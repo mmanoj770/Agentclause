@@ -96,3 +96,13 @@ def create_download(s3, key: str) -> str:
         },
         ExpiresIn=settings.download_url_ttl_seconds,
     )
+
+
+def get_object_bytes(s3, key: str) -> bytes:
+    """Read one stored file. The key must come from document_versions.storage_key, after the
+    caller was authorised by get_document. Never pass a key from request input."""
+    response = s3.get_object(Bucket=settings.s3_bucket, Key=key)
+    data = response["Body"].read(settings.max_upload_bytes + 1)
+    if len(data) > settings.max_upload_bytes:
+        raise ValueError("object is larger than the upload limit")
+    return data

@@ -9,6 +9,6 @@ boto3
 python-docx
 pypdf
 numpy
-sentence-transformers
 google-genai
 anthropic
+python-dotenv

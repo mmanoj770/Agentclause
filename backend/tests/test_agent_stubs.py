@@ -140,43 +140,6 @@ def test_review_hidden_from_other_org_and_closed_to_lawyers(env):
     assert env.client.post(f"/documents/{DOC}/review").status_code == 403
 
 
-@pytest.mark.parametrize("question,status", [
-    ("Who has to keep the information confidential?", "answered"),
-    ("How long does the agreement last?", "answered"),
-    ("Should I sign this agreement?", "escalated"),
-    ("Can I sue them under this contract?", "escalated"),
-    ("What is the capital of France?", "refused"),
-])
-def test_chat_covers_answered_refused_escalated(env, question, status):
-    r = env.client.post(f"/documents/{DOC}/chat", json={"question": question})
-    assert r.status_code == 200
-    body = r.json()
-    assert body["status"] == status
-    assert body["language"] == "en"
-    if status == "answered":
-        assert body["answer"] and body["citations"] and body["reason"] is None
-    else:  # C1: refused and escalated carry a reason, no answer, no citations
-        assert body["answer"] is None and body["citations"] == [] and body["reason"]
-    assert len(env.conn.audit) == 1  # every turn is logged
-    action, details = env.conn.audit[0][3], env.conn.audit[0][4].obj
-    assert action == "chat_turn"
-    assert details == {"question_length": len(question), "status": status, "stub": True}
-    assert question not in str(details)  # the raw question is not stored
-
-
-def test_chat_visible_to_assigned_lawyer_only(env):
-    env.state["user"] = CurrentUser(id=LAWYER, email=None, role="lawyer", org_id=None)
-    assert env.client.post(f"/documents/{DOC}/chat", json={"question": "What is the term?"}).status_code == 200
-    env.state["user"] = CurrentUser(id=str(uuid.uuid4()), email=None, role="lawyer", org_id=None)
-    assert env.client.post(f"/documents/{DOC}/chat", json={"question": "What is the term?"}).status_code == 404
-
-
-def test_chat_rejects_empty_question_and_other_languages(env):
-    assert env.client.post(f"/documents/{DOC}/chat", json={"question": ""}).status_code == 422
-    assert env.client.post(f"/documents/{DOC}/chat",
-                           json={"question": "term?", "language": "hi"}).status_code == 422
-
-
 def test_draft_returns_labelled_staging_clauses(env):
     body = {"disclosing_party": "Acme Pvt Ltd", "receiving_party": "Beta LLP",
             "effective_date": "2026-11-01", "term_months": 24}

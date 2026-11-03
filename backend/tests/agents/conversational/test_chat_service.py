@@ -21,7 +21,7 @@ GOOD = json.dumps(
     {"answerable": True, "claims": [{"text": "The term is five years.", "sources": [1]}]}
 )
 QUESTION = "What is the term of this agreement?"
-USER = ChatUser(id=uuid4(), role="startup_user")
+USER = ChatUser(id=str(uuid4()), role="startup_user")
 
 
 class RouterLLM:
@@ -211,3 +211,11 @@ def test_question_over_1000_characters_rejected():
     with pytest.raises(ValidationError):
         service.answer(USER, doc, "a" * 1001)
     assert chat_log.turns == []
+
+def test_per_call_source_and_log_override_constructor():
+    service, _, _, _ = make()
+    other_source, other_log = FakeSource(), FakeLog()
+    doc = add_doc(other_source)
+    response = service.answer(USER, doc, QUESTION, source=other_source, chat_log=other_log)
+    assert response.status == TurnStatus.ANSWERED
+    assert len(other_log.turns) == 1

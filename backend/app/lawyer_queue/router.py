@@ -17,8 +17,9 @@ class ConflictRequest(BaseModel):
 
 @router.get("")
 def list_queue(limit: int = Query(50, ge=1, le=100),
+               sort_by: str = Query("queued_at", pattern="^(queued_at|triage_tier)$"),
                user: CurrentUser = Depends(lawyer_only), conn=Depends(get_conn)):
-    return service.list_queue(conn, user, limit)
+    return service.list_queue(conn, user, limit, sort_by=sort_by)
 
 
 @router.post("/{doc_id}/claim")

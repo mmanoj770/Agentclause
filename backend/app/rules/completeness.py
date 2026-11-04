@@ -61,13 +61,15 @@ class CompletenessChecker:
         """The rule_applied of each required-clause check, in config order."""
         return [rule_id_for(self.contract_type, req.clause) for req in self.config.required]
 
-    def check(self, text: str) -> list[Finding]:
+    def check(self, text: str, found: frozenset[str] | set[str] = frozenset()) -> list[Finding]:
+        """found: clause ids intake (R2) located in the text. Such a clause counts as present even when
+        the keyword patterns miss its wording; intake only reports clauses whose text it quoted verbatim."""
         normalised = normalise(text)
         verified = self.verified
         findings = []
         for req in self.config.required:
             clause = CLAUSES[req.clause]
-            if clause.present_in(normalised):
+            if req.clause in found or clause.present_in(normalised):
                 continue
             findings.append(Finding(
                 layer=Layer.COMPLETENESS,

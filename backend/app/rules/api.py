@@ -15,6 +15,7 @@ from app.rules.engine import RuleEvaluator
 from app.rules.schema import (RuleGapError, RuleLoader, RuleSelection, SkippedRule, SkipReason,
                               VerificationStatus, base_rule_id, today_in_india)
 from app.schemas.finding import Finding, Severity
+from app.schemas.normalized_document import NormalizedDocument
 
 log = logging.getLogger(__name__)
 
@@ -33,6 +34,16 @@ def _rules(strict: bool, on: date, contract_type: str) -> RuleSelection:
 def _checkers() -> dict[str, CompletenessChecker]:
     nda = CompletenessChecker()
     return {nda.contract_type: nda}
+
+
+@lru_cache
+def all_checkers() -> dict[str, CompletenessChecker]:
+    from app.rules.completeness import CONFIG_DIR
+    checkers = {}
+    for p in sorted(CONFIG_DIR.glob("*_required_clauses.json")):
+        c = CompletenessChecker(p)
+        checkers[c.contract_type] = c
+    return checkers
 
 
 class ReviewFinding(Finding):
@@ -63,7 +74,8 @@ def evaluation_date(on: date | None = None, effective_date: date | None = None) 
 
 
 async def run_review(contract_text: str, contract_type_id: str, *, strict: bool = True,
-                     on: date | None = None, effective_date: date | None = None) -> ReviewResult:
+                     on: date | None = None, effective_date: date | None = None,
+                     found_clauses: frozenset[str] | set[str] = frozenset()) -> ReviewResult:
     """Review normalised contract text: findings most severe first, plus every rule that didn't run.
 
     contract_type_id is a contract_types code, e.g. "nda".
@@ -71,6 +83,7 @@ async def run_review(contract_text: str, contract_type_id: str, *, strict: bool 
     strict=False is for demos and tests: it also runs unverified ones, whose findings are capped at LOW.
     Rule versions are those in force on evaluation_date(on, effective_date). Pass the contract's
     effective_date when it is known (NormalizedDocument.effective_date); on overrides it.
+    found_clauses: clause ids intake already located (see run_review_normalized).
     Raises RuleGapError if that date falls between two versions of a rule.
     """
     day = evaluation_date(on, effective_date)
@@ -92,7 +105,7 @@ async def run_review(contract_text: str, contract_type_id: str, *, strict: bool 
         checker = None
     reported = {base_rule_id(f.rule_applied) for f in rule_findings}
     completeness = [ReviewFinding(**f.model_dump(), verification_status=checker.verification_status)
-                    for f in (checker.check(contract_text) if checker else [])
+                    for f in (checker.check(contract_text, found_clauses) if checker else [])
                     if f.rule_applied not in reported]
 
     findings = sorted(rule_findings + completeness,
@@ -104,6 +117,15 @@ async def run_review(contract_text: str, contract_type_id: str, *, strict: bool 
              " ".join(f"{k}={v}" for k, v in sorted(reasons.items())))
     return ReviewResult(evaluation_date=day, findings=findings,
                         skipped_rules=SkippedRules(count=len(skipped), rules=skipped))
+
+
+async def run_review_normalized(doc: NormalizedDocument, *, strict: bool = True,
+                                on: date | None = None) -> ReviewResult:
+    """run_review() for intake (R2) output: reviews doc.full_text, and the completeness checker also
+    counts the clauses intake found."""
+    return await run_review(doc.full_text, doc.document_type.value, strict=strict,
+                            on=on, effective_date=doc.effective_date,
+                            found_clauses=doc.clause_types())
 
 
 router = APIRouter(prefix="/reviews", tags=["reviews"])

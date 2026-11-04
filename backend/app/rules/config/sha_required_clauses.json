@@ -1,0 +1,9 @@
+{
+  "contract_type": "sha",
+  "verification_status": "unverified",
+  "required": [
+    {"clause": "governing-law", "severity": "high"},
+    {"clause": "confidentiality", "severity": "high"},
+    {"clause": "term", "severity": "medium"}
+  ]
+}

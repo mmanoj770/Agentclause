@@ -138,6 +138,9 @@ STUB_SCHEMA_ENTRIES: Mapping[str, frozenset[str]] = {
                       "indemnity", "return_of_information",
                       "confidential_info_definition", "obligations", "exclusions", "return_destruction",
                       "residuals"}),
+    "vendor_supplier": frozenset({"governing_law", "confidentiality", "term", "payment_terms", "termination"}),
+    "founders_agreement": frozenset({"governing_law", "confidentiality", "term", "equity_vesting", "ip_assignment"}),
+    "sha": frozenset({"governing_law", "confidentiality", "term", "transfer_restrictions", "board_composition"}),
 }
 STUB_BASELINES: Mapping[str, str] = {
     "liability-cap": "stub:baseline-liability-cap",

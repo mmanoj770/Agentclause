@@ -66,9 +66,16 @@ def load_contract_text(conn, document_id, version_id) -> str:
     return extract_text(row["storage_key"], storage.read_object(storage._client(), row["storage_key"]))
 
 
-def normalise_contract(text: str) -> NormalizedDocument:
-    from app.intake.service import IntakeService
-    return asyncio.run(IntakeService().normalize(text))
+def normalise_contract(text: str, doc_type: str = "nda") -> NormalizedDocument:
+    from app.intake.service import normalize
+    return normalize(text, doc_type)
+
+
+def _call_normalise(fn: Callable, text: str, doc_type: str) -> NormalizedDocument:
+    try:
+        return fn(text, doc_type)
+    except TypeError:
+        return fn(text)
 
 
 def our_side_from_org(conn, document_id, doc: NormalizedDocument) -> str | None:
@@ -137,6 +144,26 @@ def recover_if_stale(conn, doc_id) -> bool:
     return True
 
 
+def recover_stale_reviews(conn, max_age: timedelta = timedelta(seconds=0)) -> int:
+    """Put back documents left in under_ai_review across server process restarts or after max_age."""
+    rows = conn.execute(
+        "select id from documents where state = %s and (now() - updated_at) >= %s",
+        (DocState.UNDER_AI_REVIEW.value, max_age)).fetchall()
+    count = 0
+    for r in rows:
+        started = conn.execute(
+            "select details->>'from' as from_state from audit_logs where document_id = %s and action = 'state_change' "
+            "and details->>'to' = %s order by created_at desc limit 1",
+            (r["id"], DocState.UNDER_AI_REVIEW.value)).fetchone()
+        back = DocState(started["from_state"]) if started and started["from_state"] in REVIEWABLE else DocState.DRAFTED
+        _fail(conn, r["id"], back, layer="unknown", error_type="ServerProcessRestarted")
+        count += 1
+    if count:
+        conn.commit()
+        log.warning("pipeline: recovered %d orphaned under_ai_review document(s)", count)
+    return count
+
+
 # --- the run (background) ---------------------------------------------------------------------
 
 class LayerFailed(Exception):
@@ -164,9 +191,10 @@ def run_layers(conn, document_id, version_id, doc_type: str, deps: PipelineDeps)
         return out
 
     text = layer("R2_intake_load", lambda: deps.load_text(conn, document_id, version_id))
-    doc = layer("R2_intake", lambda: deps.normalise(text))
+    doc = layer("R2_intake", lambda: _call_normalise(deps.normalise, text, doc_type))
     review = layer("R3_R4_R5_rules", lambda: asyncio.run(
-        run_review(doc.full_text, doc_type, strict=True, effective_date=doc.effective_date)))
+        run_review(doc.full_text, doc_type, strict=True, effective_date=doc.effective_date,
+                   found_clauses=doc.clause_types())))
     stats["R3_R4_R5_rules"].update(findings=len(review.findings), skipped=review.skipped_rules.count)
 
     r6 = layer("R6_consistency", lambda: consistency.run_consistency(doc))

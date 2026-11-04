@@ -1,0 +1,9 @@
+{
+  "contract_type": "vendor_supplier",
+  "verification_status": "unverified",
+  "required": [
+    {"clause": "governing-law", "severity": "high"},
+    {"clause": "confidentiality", "severity": "medium"},
+    {"clause": "term", "severity": "medium"}
+  ]
+}

@@ -69,3 +69,7 @@ def startup_b():
 @pytest.fixture(scope="session")
 def lawyer():
     return login(*_access_creds("TEST_LAWYER_EMAIL", "TEST_LAWYER_PASSWORD"))
+
+
+def pytest_configure(config):
+    config.addinivalue_line("markers", "live: calls a real external API; skipped unless explicitly enabled")

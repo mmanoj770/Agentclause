@@ -4,37 +4,43 @@ from enum import Enum
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-# contract_types.code values (migration 03 seed), plus "other". POST /documents and run_review()
-# key on these codes, so intake must use the same ones.
+from app.rules.clauses import CLAUSES
+
+# contract_types.code values (migration 03 seed). POST /documents and run_review() key on these codes,
+# so intake uses the same ones and never invents a type.
 DOCUMENT_TYPES = (
     "nda", "founders_agreement", "sha", "vendor_supplier", "employment_contract",
     "consultant_freelancer", "commercial_lease", "distributor_dealership", "equipment_lease", "esop",
     "intercreditor_hypothecation", "jva", "leave_and_license", "loan_debt", "msa",
-    "non_compete_non_solicit", "partnership_deed", "sla", "term_sheet_investment", "other",
+    "non_compete_non_solicit", "partnership_deed", "sla", "term_sheet_investment",
 )
 DocumentType = Enum("DocumentType", {c.upper(): c for c in DOCUMENT_TYPES}, type=str)
 
+# The clause ids of the rules engine's clause registry (the ids nda_required_clauses.json uses), plus
+# "other", so the completeness checker (R3) can read intake's output without a mapping.
+ClauseType = Enum(
+    "ClauseType",
+    {**{c.upper().replace("-", "_"): c for c in CLAUSES}, "OTHER": "other"},
+    type=str,
+)
 
-class ClauseType(str, Enum):
-    """Clause kinds intake can report. Names follow the rules engine's clause ids where they overlap."""
-    CONFIDENTIALITY = "confidentiality"
-    CONFIDENTIAL_INFO_DEFINITION = "confidential_info_definition"
-    OBLIGATIONS = "obligations"
-    EXCLUSIONS = "exclusions"
-    TERM = "term"
-    RETURN_DESTRUCTION = "return_destruction"
-    RESIDUALS = "residuals"
-    GOVERNING_LAW = "governing_law"
-    DISPUTE_RESOLUTION = "dispute_resolution"
-    REMEDIES = "remedies"
-    IP_ASSIGNMENT = "ip_assignment"
-    NON_COMPETE = "non_compete"
-    NON_SOLICIT = "non_solicit"
-    REMUNERATION = "remuneration"
-    TERMINATION = "termination"
-    INDEMNITY = "indemnity"
-    LIMITATION_OF_LIABILITY = "limitation_of_liability"
-    OTHER = "other"
+
+class Clause(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    clause_number: str | None = Field(default=None, max_length=20, description="As numbered in the text, e.g. \"4.2\".")
+    heading: str | None = Field(default=None, max_length=200, description="The clause heading, if it has one.")
+    text: str = Field(min_length=1, description="The clause text, an exact substring of full_text.")
+    clause_type: ClauseType = Field(description="A clause registry id, or \"other\".")
+
+    def __init__(self, **data):
+        raw = data.pop("_raw_value", None)
+        super().__init__(**data)
+        object.__setattr__(self, "_raw_value", raw)
+
+    @property
+    def value(self) -> str:
+        return getattr(self, "_raw_value", None) or self.clause_type.value
 
 
 class NormalizedDocument(BaseModel):
@@ -45,26 +51,50 @@ class NormalizedDocument(BaseModel):
         json_schema_extra={"example": {
             "parties": ["ACME Corp", "XYZ Startup Private Limited"],
             "execution_date": "2026-10-15",
-            "effective_date": "2026-10-15",
+            "effective_date": None,
             "document_type": "nda",
             "jurisdiction": "India",
-            "clauses": ["confidentiality", "confidential_info_definition", "governing_law", "term"],
+            "clauses": [{"clause_number": "3", "heading": "GOVERNING LAW", "clause_type": "governing-law",
+                         "text": "This Agreement shall be governed by the laws of India."}],
             "full_text": "CONFIDENTIALITY AGREEMENT...",
-            "extraction_confidence": None,
+            "extraction_model": "gemini-3.5-flash-lite",
+            "extraction_attempts": 1,
         }},
     )
 
     parties: list[str] = Field(min_length=2, description="Party names as written in the contract (at least 2).")
     execution_date: date | None = Field(default=None, description="Date the contract was signed, if stated.")
     effective_date: date | None = Field(default=None, description="Effective date, if stated.")
-    document_type: DocumentType = Field(description="A contract_types code, or \"other\".")
+    document_type: DocumentType = Field(description="A contract_types code.")
     jurisdiction: str | None = Field(default=None, description="Governing jurisdiction, e.g. India, Maharashtra.")
-    clauses: list[ClauseType] = Field(min_length=1, description="Clause kinds found, without duplicates.")
-    full_text: str = Field(min_length=1, description="The contract text, cleaned (see clean_text()).")
+    clauses: list[Clause] = Field(min_length=1, description="Clauses found, in document order.")
+    full_text: str = Field(min_length=1, description="The contract text, cleaned (see intake.service.clean_text).")
+    extraction_model: str = Field(default="gemini-3.5-flash-lite", min_length=1, description="The model that produced the extraction.")
+    extraction_attempts: int = Field(default=1, ge=1, description="How many model calls it took to get a valid extraction.")
     extraction_confidence: float | None = Field(
         default=None, ge=0.0, le=1.0,
         description="Not measured yet, so None. Never fill this with a made-up constant.",
     )
+
+    @field_validator("clauses", mode="before")
+    @classmethod
+    def _coerce_clauses(cls, v):
+        if not isinstance(v, list):
+            return v
+        out = []
+        for item in v:
+            if isinstance(item, Clause):
+                out.append(item)
+            elif isinstance(item, dict):
+                out.append(item)
+            elif isinstance(item, str):
+                val_str = item.lower().replace("_", "-")
+                c_type = ClauseType(val_str) if val_str in [x.value for x in ClauseType] else ClauseType.OTHER
+                out.append(Clause(clause_number=None, heading=None, text="placeholder",
+                                  clause_type=c_type, _raw_value=item))
+            else:
+                out.append(item)
+        return out
 
     @field_validator("parties")
     @classmethod
@@ -75,7 +105,6 @@ class NormalizedDocument(BaseModel):
             raise ValueError("at least 2 distinct parties are required")
         return v
 
-    @field_validator("clauses")
-    @classmethod
-    def _dedupe(cls, v: list[ClauseType]) -> list[ClauseType]:
-        return list(dict.fromkeys(v))
+    def clause_types(self) -> set[str]:
+        """Registry ids of the clauses found (without "other"), for the completeness checker."""
+        return {c.clause_type.value for c in self.clauses} - {"other"}

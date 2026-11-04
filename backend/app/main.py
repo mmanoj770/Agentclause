@@ -9,6 +9,13 @@ from app.users.router import router as users_router
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     pool.open()
+    try:
+        from app.pipeline.runner import recover_stale_reviews
+        with pool.connection(timeout=0.1) as conn:
+            recover_stale_reviews(conn)
+    except Exception:
+        # Don't fail server startup if database is not reachable yet or unmigrated
+        pass
     yield
     pool.close()
 

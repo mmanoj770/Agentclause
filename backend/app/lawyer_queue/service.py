@@ -18,13 +18,24 @@ where d.state = 'pending_lawyer_review'
     select 1 from lawyer_conflicts c
     where c.lawyer_id = %s and c.org_id = d.org_id
   )
-order by d.queued_at asc, d.id asc
+order by {order_clause}
 limit %s
 """
 
+ORDER_QUEUED_AT = "d.queued_at asc, d.id asc"
+ORDER_TRIAGE_TIER = """
+case d.triage_tier
+  when 'critical' then 1
+  when 'enhanced' then 2
+  when 'standard' then 3
+  else 4
+end, d.queued_at asc, d.id asc
+"""
 
-def list_queue(conn, user: CurrentUser, limit: int = 50) -> list[dict]:
-    return conn.execute(QUEUE_SQL, (user.id, limit)).fetchall()
+
+def list_queue(conn, user: CurrentUser, limit: int = 50, sort_by: str = "queued_at") -> list[dict]:
+    order_clause = ORDER_TRIAGE_TIER if sort_by == "triage_tier" else ORDER_QUEUED_AT
+    return conn.execute(QUEUE_SQL.format(order_clause=order_clause), (user.id, limit)).fetchall()
 
 
 def claim(conn, user: CurrentUser, doc_id) -> dict:

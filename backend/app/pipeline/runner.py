@@ -79,14 +79,15 @@ def _call_normalise(fn: Callable, text: str, doc_type: str) -> NormalizedDocumen
 
 
 def our_side_from_org(conn, document_id, doc: NormalizedDocument) -> str | None:
-    """The party that is the document's own organisation, if its name matches one intake found exactly
-    (ignoring case and spacing). None when it doesn't: R7 then has no side to score from and is skipped."""
+    """The party that is the document's own organisation, matching the org name using normalized
+    form or conservative fuzzy fallback. None when it doesn't: R7 then has no side to score from and is skipped."""
+    from app.pipeline.asymmetry import match_party_to_org
+
     row = conn.execute("select o.name from documents d join organizations o on o.id = d.org_id where d.id = %s",
                        (document_id,)).fetchone()
     if not row or not row["name"]:
         return None
-    wanted = " ".join(row["name"].split()).casefold()
-    return next((p for p in doc.parties if " ".join(p.split()).casefold() == wanted), None)
+    return match_party_to_org(row["name"], doc.parties)
 
 
 @dataclass

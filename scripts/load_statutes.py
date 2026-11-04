@@ -36,7 +36,7 @@ def sha256_of(path: Path) -> str:
     return h.hexdigest()
 
 
-def load_statutes(seed_path: Path, apply: bool = False) -> None:
+def load_statutes(seed_path: Path, apply: bool = False, update_staging: bool = False) -> None:
     if not seed_path.is_file():
         log.error("Seed file not found: %s", seed_path)
         sys.exit(1)
@@ -49,7 +49,12 @@ def load_statutes(seed_path: Path, apply: bool = False) -> None:
         log.error("Seed file must contain a JSON array of statute entries.")
         sys.exit(1)
 
-    log.info("Found %d statute entries to process. Mode: %s", len(data), "APPLY" if apply else "DRY-RUN")
+    log.info(
+        "Found %d statute entries to process. Mode: %s, Update-Staging: %s",
+        len(data),
+        "APPLY" if apply else "DRY-RUN",
+        update_staging,
+    )
 
     pool.open()
     try:
@@ -61,6 +66,7 @@ def load_statutes(seed_path: Path, apply: bool = False) -> None:
                 sys.exit(1)
 
             inserted = 0
+            updated = 0
             skipped = 0
 
             for entry in data:
@@ -71,18 +77,58 @@ def load_statutes(seed_path: Path, apply: bool = False) -> None:
                 heading = entry.get("heading")
                 statute_text = entry["statute_text"]
                 source_url = entry.get("source_url")
+                seed_hash = hashlib.sha256(statute_text.encode("utf-8")).hexdigest()
 
                 # Check if row exists
                 existing = conn.execute(
-                    "select id, status from public.statutes where act = %s and section = %s and effective_from = %s",
+                    "select id, status, statute_text from public.statutes where act = %s and section = %s and effective_from = %s",
                     (act, section, effective_from)
                 ).fetchone()
 
                 if existing:
-                    skipped += 1
-                    log.info("SKIP (exists): %s s. %s (effective: %s, status: %s)",
-                             act, section, effective_from, existing["status"])
-                    continue
+                    db_text = existing.get("statute_text") or ""
+                    db_hash = hashlib.sha256(db_text.encode("utf-8")).hexdigest()
+                    status = existing.get("status")
+
+                    if seed_hash != db_hash:
+                        log.warning(
+                            "DRIFT DETECTED: %s s. %s (seed hash: %s, db hash: %s, status: %s)",
+                            act, section, seed_hash[:8], db_hash[:8], status
+                        )
+                        if status == "verified":
+                            log.warning(
+                                "CANNOT OVERWRITE: %s s. %s is verified in DB. Verified rows cannot be overwritten by seed loader.",
+                                act, section
+                            )
+                            skipped += 1
+                            continue
+                        elif update_staging:
+                            if apply:
+                                conn.execute(
+                                    """
+                                    update public.statutes
+                                    set statute_text = %s, heading = %s, source_url = %s, effective_to = %s
+                                    where id = %s
+                                    """,
+                                    (statute_text, heading, source_url, effective_to, existing["id"])
+                                )
+                                log.info("UPDATE (APPLIED): %s s. %s (staging updated with seed text)", act, section)
+                            else:
+                                log.info("UPDATE (WOULD UPDATE): %s s. %s (staging would be updated with --apply)", act, section)
+                            updated += 1
+                            continue
+                        else:
+                            log.info(
+                                "SKIP (exists, staging drift detected, pass --update-staging to overwrite): %s s. %s",
+                                act, section
+                            )
+                            skipped += 1
+                            continue
+                    else:
+                        skipped += 1
+                        log.info("SKIP (exists, matching): %s s. %s (effective: %s, status: %s)",
+                                 act, section, effective_from, status)
+                        continue
 
                 if apply:
                     conn.execute(
@@ -100,11 +146,11 @@ def load_statutes(seed_path: Path, apply: bool = False) -> None:
 
             if apply:
                 conn.commit()
-                log.info("SUCCESS: Inserted %d rows, skipped %d existing rows.", inserted, skipped)
+                log.info("SUCCESS: Inserted %d rows, updated %d rows, skipped %d existing rows.", inserted, updated, skipped)
             else:
                 conn.rollback()
-                log.info("DRY-RUN FINISHED: Would insert %d rows, skipped %d existing rows. No changes committed.",
-                         inserted, skipped)
+                log.info("DRY-RUN FINISHED: Would insert %d rows, would update %d rows, skipped %d existing rows. No changes committed.",
+                         inserted, updated, skipped)
     finally:
         pool.close()
 
@@ -112,7 +158,8 @@ def load_statutes(seed_path: Path, apply: bool = False) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Load seed statutes into public.statutes")
     parser.add_argument("--apply", action="store_true", help="Execute the insert and commit to database")
+    parser.add_argument("--update-staging", action="store_true", help="Allow updating staging rows when drift is detected")
     parser.add_argument("--file", type=Path, default=DEFAULT_SEED, help="Path to seed JSON file")
     args = parser.parse_args()
 
-    load_statutes(args.file, apply=args.apply)
+    load_statutes(args.file, apply=args.apply, update_staging=args.update_staging)

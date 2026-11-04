@@ -94,3 +94,34 @@ def display_status(status: str) -> str:
     if st == "verified":
         return "verified"
     raise ValueError(f"Unknown verification_status: {status!r}")
+
+
+def normalize_statute_quote(text: str) -> str:
+    """Normalize statute text for comparison between rule files and seed statutes.
+
+    Strips rule prefix citations (e.g. 's.28: \"'), exceptions, punctuation, and collapses
+    whitespace/casing to compare the core statutory quote text.
+    """
+    if not text:
+        return ""
+    # Strip rule prefix like 's.28: "' or 's.15: "'
+    t = re.sub(r'^\s*s\.\s*\d+\s*:\s*["\']?', '', text)
+    # Strip statutory exceptions appended to rule basis (e.g. 'Exception 1: ...')
+    t = re.sub(r'["\']?\s*Exception\s*\d+.*$', '', t, flags=re.DOTALL)
+    # Strip quotes
+    t = re.sub(r'["\'`]', ' ', t)
+    # Strip subsection markers like (a), (b), (1)
+    t = re.sub(r'\([a-zA-Z0-9]+\)', ' ', t)
+    # Normalize punctuation and non-alphanumeric
+    t = re.sub(r'[^a-zA-Z0-9\s]', ' ', t)
+    tokens = t.casefold().split()
+    # Normalize minor memory drafting variant in s.28: "a contract" vs "any contract"
+    # in "...liability under or in respect of a/any contract..."
+    norm = []
+    for tok in tokens:
+        if tok == "any" and norm and norm[-1] == "of":
+            norm.append("a")
+        else:
+            norm.append(tok)
+    return " ".join(norm)
+

@@ -29,10 +29,12 @@ def test_generate_advocate_review_pack(tmp_path, monkeypatch):
         reader = list(csv.DictReader(f))
 
     rules_in_csv = [r for r in reader if r["category"] == "seed_rule"]
+    statutes_in_csv = [r for r in reader if r["category"] == "statute"]
     clauses_in_csv = [r for r in reader if r["category"] == "required_clause"]
 
-    # Exactly 7 seed rules
+    # Exactly 7 seed rules + 1 seed statute (CPC s. 20)
     assert len(rules_in_csv) == 7
+    assert len(statutes_in_csv) == 1
     rule_ids = {r["identifier"] for r in rules_in_csv}
     assert "ICA_S27_RESTRAINT_OF_TRADE" in rule_ids
     assert "ICA_S28_RESTRAINT_OF_LEGAL_PROCEEDINGS" in rule_ids
@@ -41,6 +43,11 @@ def test_generate_advocate_review_pack(tmp_path, monkeypatch):
     assert "MSMED_S16_INTEREST_WAIVER" in rule_ids
     assert "NDA_CONFIDENTIAL_INFO_DEFINITION_MISSING" in rule_ids
     assert "NDA_GOVERNING_LAW_MISSING" in rule_ids
+
+    # Store column present and accurate
+    assert all("store" in r and r["store"] for r in reader)
+    assert any(r["store"] == "seed_statutes" for r in reader)
+    assert any(r["store"] == "rules + seed_statutes" for r in reader)
 
     # Required clauses for all 4 contract types
     contract_types_in_csv = {r["contract_type_or_applies_to"] for r in clauses_in_csv}
@@ -52,7 +59,7 @@ def test_generate_advocate_review_pack(tmp_path, monkeypatch):
 
     # Read Markdown
     md_content = md_path.read_text(encoding="utf-8")
-    assert "# Advocate Review Pack (R3 Completeness & R5 Seed Rules)" in md_content
+    assert "# Advocate Review Pack (R3 Completeness, R5 Seed Rules & Database Statutes)" in md_content
     assert "ICA_S27_RESTRAINT_OF_TRADE" in md_content
     assert "https://www.indiacode.nic.in" in md_content
 

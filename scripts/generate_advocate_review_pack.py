@@ -4,7 +4,7 @@
 Sources:
 - backend/app/rules/config/*_required_clauses.json (4 contract types)
 - backend/app/rules/rules/*.json (7 seed rules)
-- backend/app/rules/config/seed_statutes.json (India Code URLs)
+- backend/app/rules/config/seed_statutes.json (India Code URLs & CPC s.20)
 
 Outputs:
 - docs/advocate_review_pack.md
@@ -27,34 +27,45 @@ CONTRACT_TYPES = [
 ]
 
 
-def load_seed_statutes() -> dict[tuple[str, str], dict]:
+def load_seed_statutes() -> list[dict]:
     path = CONFIG_DIR / "seed_statutes.json"
     if not path.exists():
-        return {}
-    items = json.loads(path.read_text(encoding="utf-8"))
-    lookup = {}
-    for item in items:
-        lookup[(item["act"].strip(), item["section"].strip())] = item
-    return lookup
+        return []
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def generate():
     DOCS_DIR.mkdir(parents=True, exist_ok=True)
-    statute_lookup = load_seed_statutes()
+    seed_statutes_list = load_seed_statutes()
+    statute_lookup = {(s["act"].strip(), s["section"].strip()): s for s in seed_statutes_list}
 
-    # 1. Load Rules
-    rules = []
+    # 1. Load Rules and correlate with seed_statutes
+    statutes_and_rules = []
+    matched_seeds = set()
+
     for p in sorted(RULES_DIR.glob("*.json")):
         data = json.loads(p.read_text(encoding="utf-8"))
         statute = data.get("statute", "")
-        section = data.get("section", "")
+        section = str(data.get("section", ""))
+
         india_code_url = ""
-        # Match statute in lookup
+        staged_quote = data.get("basis", "")
+        store = "rules"
+
+        # Match in seed_statutes
+        seed_match = None
         for (act, sec), stat in statute_lookup.items():
             if act.lower() in statute.lower() and sec.lower() == section.lower():
-                india_code_url = stat.get("source_url", "")
+                seed_match = stat
+                matched_seeds.add((act, sec))
                 break
-        if not india_code_url:
+
+        if seed_match:
+            store = "rules + seed_statutes"
+            india_code_url = seed_match.get("source_url", "")
+            if not staged_quote or staged_quote == "(none staged)":
+                staged_quote = seed_match.get("statute_text", "")
+        else:
             if "Indian Contract Act" in statute:
                 india_code_url = "https://www.indiacode.nic.in/handle/123456789/2187?view_type=browse&sam_handle=123456789/1362"
             elif "Micro, Small and Medium" in statute:
@@ -62,12 +73,14 @@ def generate():
             else:
                 india_code_url = "N/A (Internal Baseline)"
 
-        rules.append({
+        statutes_and_rules.append({
+            "category": "seed_rule",
             "file": p.name,
-            "rule_id": data["rule_id"],
+            "identifier": data["rule_id"],
+            "store": store,
             "statute": statute,
             "section": section,
-            "staged_quote": data.get("basis", "(none staged)"),
+            "staged_quote": staged_quote or "(none staged)",
             "india_code_url": india_code_url,
             "plain_english_logic": data.get("description", ""),
             "remedy": data.get("remedy_suggested", ""),
@@ -75,7 +88,26 @@ def generate():
             "applies_to": ", ".join(data.get("applies_to", [])),
         })
 
-    # 2. Load Contract Types & Required Clauses
+    # 2. Add seed_statutes rows not covered by rules (e.g. CPC s. 20)
+    for stat in seed_statutes_list:
+        key = (stat["act"].strip(), stat["section"].strip())
+        if key not in matched_seeds:
+            statutes_and_rules.append({
+                "category": "statute",
+                "file": "seed_statutes.json",
+                "identifier": f"STATUTE_{stat['act'][:3].upper()}_S{stat['section']}",
+                "store": "seed_statutes",
+                "statute": stat["act"],
+                "section": stat["section"],
+                "staged_quote": stat.get("statute_text", ""),
+                "india_code_url": stat.get("source_url", "https://www.indiacode.nic.in"),
+                "plain_english_logic": f"{stat.get('heading', '')} (Jurisdiction baseline)",
+                "remedy": "Ensure governing law and court submission clauses align with civil procedure jurisdiction limits.",
+                "severity": "high",
+                "applies_to": "all (jurisdiction baseline)",
+            })
+
+    # 3. Load Contract Types & Required Clauses
     contract_configs = []
     for c_id, label, path in CONTRACT_TYPES:
         if path.exists():
@@ -89,6 +121,7 @@ def generate():
         writer.writerow([
             "category",
             "identifier",
+            "store",
             "contract_type_or_applies_to",
             "statute_or_context",
             "section_or_clause",
@@ -96,16 +129,20 @@ def generate():
             "india_code_url",
             "plain_english_logic",
             "verified",
+            "advocate_name",
+            "verification_date",
+            "verification_ref",
             "corrected_quote",
             "notes",
             "verified / corrected quote / notes",
         ])
 
-        # Write seed rules
-        for r in rules:
+        # Write seed rules & statutes
+        for r in statutes_and_rules:
             writer.writerow([
-                "seed_rule",
-                r["rule_id"],
+                r["category"],
+                r["identifier"],
+                r["store"],
                 r["applies_to"],
                 r["statute"],
                 r["section"],
@@ -113,9 +150,12 @@ def generate():
                 r["india_code_url"],
                 r["plain_english_logic"],
                 "",  # verified (blank for advocate)
+                "",  # advocate_name
+                "",  # verification_date
+                "",  # verification_ref
                 "",  # corrected_quote
                 "",  # notes
-                "",  # verified / corrected quote / notes
+                "",  # combined legacy notes
             ])
 
         # Write required clauses
@@ -124,6 +164,7 @@ def generate():
                 writer.writerow([
                     "required_clause",
                     f"{c_id}:{req['clause']}",
+                    "completeness_config",
                     c_id,
                     label,
                     req["clause"],
@@ -134,44 +175,48 @@ def generate():
                     "",
                     "",
                     "",
+                    "",
+                    "",
+                    "",
                 ])
 
     # --- Generate Markdown ---
     md_path = DOCS_DIR / "advocate_review_pack.md"
     lines = [
-        "# Advocate Review Pack (R3 Completeness & R5 Seed Rules)",
+        "# Advocate Review Pack (R3 Completeness, R5 Seed Rules & Database Statutes)",
         "",
         "> [!IMPORTANT]",
         "> **For Verifying Advocate / Legal Counsel**:",
-        "> This review pack is compiled automatically from the AgentClause repository configurations and rule files.",
-        "> In accordance with platform governance, production strict mode returns zero findings on unverified rules until",
-        "> a licensed Indian advocate verifies these quotes against authoritative sources (India Code) and confirms the required clauses.",
+        "> This review pack is compiled automatically from the AgentClause repository configurations, rule files,",
+        "> and database seed statutes. In accordance with platform governance, production strict mode returns zero",
+        "> findings on unverified rules until a licensed Indian advocate verifies these quotes against authoritative",
+        "> sources (India Code) and confirms the required clauses.",
         "",
         "## Review Instructions",
-        "1. **Statutory Quotes (R5)**: Open each India Code URL and check whether the staged quote matches the operative statutory text word-for-word. Note any corrections.",
+        "1. **Statutory Quotes (R5 & Database Statutes)**: Open each India Code URL and check whether the staged quote matches the operative statutory text word-for-word. Note any corrections.",
         "2. **Required Clause Lists (R3)**: Confirm that the mandatory clause lists reflect standard practice and legal enforceability under Indian law.",
-        "3. **Sign-off**: Mark verified rows in `docs/advocate_review_pack.csv` with `verified` = `yes` and provide your name, Bar Council enrollment number, and date.",
+        "3. **Sign-off**: Mark verified rows in `docs/advocate_review_pack.csv` with `verified` = `yes`, `advocate_name` = `<Your Name>`, and `verification_date` = `<YYYY-MM-DD>`.",
         "",
         "---",
         "",
-        "## Part 1: Statutory Seed Rules (7 Rules)",
+        f"## Part 1: Statutory Seed Rules & Database Statutes ({len(statutes_and_rules)} Entries)",
         "",
     ]
 
-    for i, r in enumerate(rules, 1):
+    for i, r in enumerate(statutes_and_rules, 1):
         lines.extend([
-            f"### {i}. Rule `{r['rule_id']}`",
-            f"- **Statute & Section**: {r['statute']}, s. {r['section']}",
+            f"### {i}. `{r['identifier']}` ({r['statute']}, s. {r['section']})",
+            f"- **Store**: `{r['store']}`",
             f"- **Severity**: `{r['severity']}` | **Applies To**: {r['applies_to']}",
             f"- **India Code Verification URL**: [{r['india_code_url']}]({r['india_code_url']})",
-            f"- **Rule Logic**: {r['plain_english_logic']}",
+            f"- **Rule Logic / Heading**: {r['plain_english_logic']}",
             f"- **Remedy Suggested**: {r['remedy']}",
             "- **Staged Quote**:",
             "  > " + r['staged_quote'].replace("\n", "\n  > "),
             "",
-            "| Verified (Yes/No) | Corrected Quote (if any) | Advocate Notes |",
-            "| :---: | :--- | :--- |",
-            "| [ ] | | |",
+            "| Verified (Yes/No) | Advocate Name | Date (YYYY-MM-DD) | Corrected Quote (if any) | Notes |",
+            "| :---: | :---: | :---: | :--- | :--- |",
+            "| [ ] | | | | |",
             "",
         ])
 
@@ -185,6 +230,7 @@ def generate():
     for c_id, label, cfg in contract_configs:
         lines.extend([
             f"### Contract Type: {label} (`{c_id}`)",
+            f"- **Store**: `completeness_config`",
             f"- **Current Verification Status**: `{cfg.get('verification_status', 'unverified')}`",
             f"- **Total Required Clauses**: {len(cfg.get('required', []))}",
             "",
@@ -203,4 +249,3 @@ def generate():
 
 if __name__ == "__main__":
     generate()
-

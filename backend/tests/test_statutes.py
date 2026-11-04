@@ -130,3 +130,107 @@ def test_stub_corpus_is_stub_and_never_counts_as_verified():
     assert "stub" in corpus.LABEL.lower()
     # Returns stub reference format, never an active database UUID
     assert corpus.find_statute("indian contract act", 1872, "27") == "stub:ica-1872-s27"
+
+
+# --- Task 2: Single source of truth & asymmetry tests ------------------------------------------
+
+import json
+from pathlib import Path
+from app.statutes.normalizer import normalize_statute_quote
+
+RULES_DIR = Path(__file__).resolve().parents[1] / "app" / "rules" / "rules"
+CONFIG_DIR = Path(__file__).resolve().parents[1] / "app" / "rules" / "config"
+
+# Explicit allowlist of known asymmetries between rules/ and seed_statutes.json:
+# 1. Internal baseline rules: completeness checks for NDAs that do not map to external Acts in public.statutes.
+KNOWN_RULE_ONLY_STATUTES = {
+    ("Internal", "NDA baseline, definition of Confidential Information"): (
+        "Internal baseline for NDA completeness; not an external statute in public.statutes."
+    ),
+    ("Internal", "NDA baseline, governing law"): (
+        "Internal baseline for NDA governing law completeness; not an external statute in public.statutes."
+    ),
+}
+
+# 2. Database seed statutes not yet converted into automated rule files in rules/:
+# CPC s. 20 is a baseline for jurisdiction screening in the citation gate, not an automated rule finding.
+KNOWN_SEED_ONLY_STATUTES = {
+    ("Code of Civil Procedure, 1908", "20"): (
+        "CPC s. 20 jurisdiction baseline for citation gate; not currently evaluated as an automated rule in rules/."
+    ),
+}
+
+
+def test_statute_quotes_agree_between_rules_and_seed_statutes():
+    """Assert that for every (act, section) present in both stores, act, section and quote agree after normalization."""
+    seed_path = CONFIG_DIR / "seed_statutes.json"
+    assert seed_path.exists(), "seed_statutes.json missing"
+    seed_statutes = json.loads(seed_path.read_text(encoding="utf-8"))
+    seeds_by_citation = {}
+    for s in seed_statutes:
+        act_norm, sec_norm = normalise_statute_citation(s["act"], None, s["section"])
+        seeds_by_citation[(act_norm, sec_norm)] = s
+
+    rules = []
+    for p in RULES_DIR.glob("*.json"):
+        r = json.loads(p.read_text(encoding="utf-8"))
+        if r.get("statute") and r.get("statute") != "Internal":
+            act_norm, sec_norm = normalise_statute_citation(r["statute"], None, str(r["section"]))
+            rules.append((act_norm, sec_norm, r))
+
+    assert len(rules) >= 5, "Expected at least 5 statutory rule files"
+
+    agreed_count = 0
+    for act_norm, sec_norm, r in rules:
+        key = (act_norm, sec_norm)
+        if key in seeds_by_citation:
+            seed_row = seeds_by_citation[key]
+            # Verify Act and section agree
+            assert act_norm == normalise_act_name(seed_row["act"])
+            assert sec_norm == normalise_section_number(seed_row["section"])
+
+            # Verify quote text agreement (if quote is staged in the rule file)
+            r_basis = r.get("basis")
+            s_text = seed_row.get("statute_text")
+            if r_basis:
+                norm_r = normalize_statute_quote(r_basis)
+                norm_s = normalize_statute_quote(s_text)
+                assert norm_r == norm_s, f"Quote mismatch for {act_norm} s.{sec_norm}:\nRule: {norm_r}\nSeed: {norm_s}"
+                agreed_count += 1
+            else:
+                # s.27 has basis=null in rule file; quote lives in seed_statutes.json
+                assert key == ("Indian Contract Act, 1872", "27")
+
+    assert agreed_count >= 4, "Expected at least 4 shared quotes to agree after normalization"
+
+
+def test_statute_asymmetry_seed_rules_vs_seed_statutes():
+    """Verify that every discrepancy between seed rules and seed_statutes.json is documented and accounted for."""
+    seed_statutes = json.loads((CONFIG_DIR / "seed_statutes.json").read_text(encoding="utf-8"))
+    seed_keys = {
+        normalise_statute_citation(s["act"], None, s["section"]): s for s in seed_statutes
+    }
+
+    rule_keys = {}
+    for p in RULES_DIR.glob("*.json"):
+        r = json.loads(p.read_text(encoding="utf-8"))
+        statute = r.get("statute")
+        sec = str(r.get("section", ""))
+        if statute == "Internal":
+            key = ("Internal", sec)
+        else:
+            key = normalise_statute_citation(statute, None, sec)
+        rule_keys[key] = r
+
+    # Rules that have no seed_statutes row
+    rule_only = {k: rule_keys[k] for k in rule_keys if k not in seed_keys}
+    assert set(rule_only.keys()) == set(KNOWN_RULE_ONLY_STATUTES.keys()), (
+        f"Unexpected rules without seed_statutes.json entry: {set(rule_only.keys()) - set(KNOWN_RULE_ONLY_STATUTES.keys())}"
+    )
+
+    # Seed statutes that have no rule file
+    seed_only = {k: seed_keys[k] for k in seed_keys if k not in rule_keys}
+    assert set(seed_only.keys()) == set(KNOWN_SEED_ONLY_STATUTES.keys()), (
+        f"Unexpected seed_statutes without rule file: {set(seed_only.keys()) - set(KNOWN_SEED_ONLY_STATUTES.keys())}"
+    )
+

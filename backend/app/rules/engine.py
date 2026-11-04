@@ -1,10 +1,19 @@
 """Rule Engine (R4): evaluates rules against a contract's normalised text and returns Findings."""
 import re
 from datetime import date
+from pydantic import BaseModel
 
 from app.rules.clauses import CLAUSES, normalise
 from app.rules.schema import INTERNAL, Rule, parse_condition, today_in_india
 from app.schemas.finding import Finding, Layer, Severity
+
+
+class RuleEvaluationResult(BaseModel):
+    findings: list[Finding]
+    rules_total: int
+    rules_evaluated: int
+    rules_skipped_unverified: list[str]
+    review_status: str
 
 MAX_CLAUSE_REFERENCE = 200
 # A clause number at the start of a line: "7.", "7.2", "12)", "Clause 7".
@@ -69,6 +78,40 @@ class RuleEvaluator:
             if clause_reference is not None:
                 findings.append(self._finding(rule, clause_reference, contract_type))
         return findings
+
+    def evaluate_with_coverage(self, text: str, contract_type: str, *, strict: bool = False) -> RuleEvaluationResult:
+        contract_type = contract_type.strip().lower()
+        normalised = normalise(text)
+        applicable = [r for r in self.rules if contract_type in r.applies_to and r.in_force_on(self.today)]
+        rules_total = len(applicable)
+        if strict:
+            to_run = [r for r in applicable if r.verified]
+            skipped_unverified = [r.versioned_id for r in applicable if not r.verified]
+        else:
+            to_run = applicable
+            skipped_unverified = []
+
+        rules_evaluated = len(to_run)
+        findings = []
+        for rule in to_run:
+            clause_reference = self._fires(rule, text, normalised)
+            if clause_reference is not None:
+                findings.append(self._finding(rule, clause_reference, contract_type))
+
+        if rules_total == 0 or rules_evaluated == rules_total:
+            review_status = "complete"
+        elif rules_evaluated == 0:
+            review_status = "no_rules_verified"
+        else:
+            review_status = "partial_unverified_rules"
+
+        return RuleEvaluationResult(
+            findings=findings,
+            rules_total=rules_total,
+            rules_evaluated=rules_evaluated,
+            rules_skipped_unverified=skipped_unverified,
+            review_status=review_status,
+        )
 
     @staticmethod
     def _fires(rule: Rule, text: str, normalised: str) -> str | None:

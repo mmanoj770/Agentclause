@@ -508,3 +508,95 @@ def test_reviews_endpoint_demo_mode_is_labelled(client, logged_in):
 def test_reviews_endpoint_requires_login(client):
     r = client.post("/reviews", json={"contract_text": "x", "contract_type_id": "nda"})
     assert r.status_code in (401, 403)
+
+
+# --- Task 1: Coverage and review_status tests --------------------------------------------------
+
+def test_coverage_none_verified_in_strict_mode():
+    res = outcome(NDA_NO_GOVERNING_LAW, strict=True)
+    assert res.coverage.review_status == "no_rules_verified"
+    assert res.coverage.rules_total > 0
+    assert res.coverage.rules_evaluated == 0
+    assert len(res.coverage.rules_skipped_unverified) == res.coverage.rules_total
+
+
+def test_coverage_some_unverified_in_strict_mode(monkeypatch):
+    # One verified statutory rule, completeness unverified
+    v = rule(rule_id="ICA_S27_RESTRAINT_OF_TRADE", verification_status="verified")
+    uv = rule(rule_id="ICA_S74_PENALTY_OR_LIQUIDATED_DAMAGES", verification_status="unverified")
+    monkeypatch.setattr(
+        api, "_rules",
+        lambda strict, on, contract_type: RuleSelection(
+            rules=(v,) if strict else (v, uv),
+            skipped=(api.SkippedRule(rule_id=uv.rule_id, version=uv.version, reason=SkipReason.UNVERIFIED_IN_STRICT_MODE),) if strict else ()
+        )
+    )
+    res = outcome(NDA_WITH_RESTRAINT, strict=True)
+    assert res.coverage.review_status == "partial_unverified_rules"
+    assert res.coverage.rules_evaluated > 0
+    assert len(res.coverage.rules_skipped_unverified) > 0
+    assert res.coverage.rules_total == res.coverage.rules_evaluated + len(res.coverage.rules_skipped_unverified)
+
+
+def test_coverage_all_verified_in_strict_mode(monkeypatch):
+    v = rule(rule_id="ICA_S27_RESTRAINT_OF_TRADE", verification_status="verified")
+    monkeypatch.setattr(
+        api, "_rules",
+        lambda strict, on, contract_type: RuleSelection(rules=(v,), skipped=())
+    )
+    # Also mock completeness checker to verified
+    checker = api._checkers()["nda"]
+    monkeypatch.setattr(checker.config, "verification_status", VerificationStatus.VERIFIED)
+    res = outcome(NDA_WITH_RESTRAINT, strict=True)
+    assert res.coverage.review_status == "complete"
+    assert res.coverage.rules_skipped_unverified == []
+    assert res.coverage.rules_evaluated == res.coverage.rules_total
+
+
+def test_coverage_demo_mode_is_complete():
+    res = outcome(NDA_NO_GOVERNING_LAW, strict=False)
+    assert res.coverage.review_status == "complete"
+    assert res.coverage.rules_evaluated == res.coverage.rules_total
+    assert res.coverage.rules_skipped_unverified == []
+
+
+def test_engine_evaluate_with_coverage():
+    from app.rules.engine import RuleEvaluator
+    r_verified = rule(rule_id="RULE_V", verification_status="verified")
+    r_unverified = rule(rule_id="RULE_UV", verification_status="unverified")
+    evaluator = RuleEvaluator([r_verified, r_unverified])
+
+    res_strict = evaluator.evaluate_with_coverage("text", "nda", strict=True)
+    assert res_strict.review_status == "partial_unverified_rules"
+    assert res_strict.rules_total == 2
+    assert res_strict.rules_evaluated == 1
+    assert res_strict.rules_skipped_unverified == [r_unverified.versioned_id]
+
+    # None verified
+    evaluator_uv = RuleEvaluator([r_unverified])
+    res_uv = evaluator_uv.evaluate_with_coverage("text", "nda", strict=True)
+    assert res_uv.review_status == "no_rules_verified"
+    assert res_uv.rules_evaluated == 0
+
+    # Demo
+    res_demo = evaluator.evaluate_with_coverage("text", "nda", strict=False)
+    assert res_demo.review_status == "complete"
+    assert res_demo.rules_evaluated == 2
+
+
+def test_completeness_check_with_coverage():
+    from app.rules.completeness import CompletenessChecker
+    checker = CompletenessChecker()
+    # By default, shipped completeness configs are unverified
+    res_strict = checker.check_with_coverage("A bare page.", strict=True)
+    assert res_strict.review_status == "no_rules_verified"
+    assert res_strict.rules_evaluated == 0
+    assert len(res_strict.rules_skipped_unverified) == res_strict.rules_total
+    assert res_strict.findings == []
+
+    res_demo = checker.check_with_coverage("A bare page.", strict=False)
+    assert res_demo.review_status == "complete"
+    assert res_demo.rules_evaluated == res_demo.rules_total
+    assert res_demo.rules_skipped_unverified == []
+    assert len(res_demo.findings) > 0
+

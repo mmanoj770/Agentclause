@@ -195,7 +195,12 @@ def run_layers(conn, document_id, version_id, doc_type: str, deps: PipelineDeps)
     review = layer("R3_R4_R5_rules", lambda: asyncio.run(
         run_review(doc.full_text, doc_type, strict=True, effective_date=doc.effective_date,
                    found_clauses=doc.clause_types())))
-    stats["R3_R4_R5_rules"].update(findings=len(review.findings), skipped=review.skipped_rules.count)
+    stats["R3_R4_R5_rules"].update(
+        findings=len(review.findings),
+        skipped=review.skipped_rules.count,
+        coverage=review.coverage.model_dump(),
+        review_status=review.coverage.review_status,
+    )
 
     r6 = layer("R6_consistency", lambda: consistency.run_consistency(doc))
     r6_findings = _strict(r6.findings, consistency._default_config())
@@ -227,8 +232,17 @@ def save_results(conn, document_id, version_id, passed, tier: dict, stats: dict)
                      (version_id,))
         created = insert_agent_findings(conn, document_id, version_id, passed)
         save_triage(conn, document_id, tier)
+        coverage_data = stats.get("R3_R4_R5_rules", {}).get("coverage")
+        review_status = stats.get("R3_R4_R5_rules", {}).get("review_status", "complete")
         write_audit(conn, document_id=document_id, actor_id=None, actor_role="system", action="findings_created",
-                    details={"count": created, "version_id": str(version_id), "strict": True, "layers": stats})
+                    details={
+                        "count": created,
+                        "version_id": str(version_id),
+                        "strict": True,
+                        "layers": stats,
+                        "coverage": coverage_data,
+                        "review_status": review_status,
+                    })
         transition(conn, document_id, DocState.PENDING_LAWYER_REVIEW, SYSTEM_ACTOR, "AI review finished")
     return created
 
@@ -272,5 +286,12 @@ def run_pipeline(document_id, version_id, from_state: str, *, deps: PipelineDeps
     ms = round((time.monotonic() - started) * 1000, 1)
     log.info("pipeline: document_id=%s version_id=%s findings=%d tier=%s ms=%.1f layers=%s", document_id, version_id,
              created, tier["review_tier"], ms, {k: v.get("ms") for k, v in stats.items()})
-    return {"outcome": "pending_lawyer_review", "findings": created, "tier": tier["review_tier"], "ms": ms,
-            "layers": stats}
+    return {
+        "outcome": "pending_lawyer_review",
+        "findings": created,
+        "tier": tier["review_tier"],
+        "ms": ms,
+        "layers": stats,
+        "coverage": stats.get("R3_R4_R5_rules", {}).get("coverage"),
+        "review_status": stats.get("R3_R4_R5_rules", {}).get("review_status", "complete"),
+    }

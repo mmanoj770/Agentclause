@@ -5,6 +5,7 @@ from datetime import date
 from enum import Enum
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -61,11 +62,21 @@ class SkippedRules(BaseModel):
     rules: list[SkippedRule]
 
 
+class Coverage(BaseModel):
+    rules_total: int = Field(description="Total rules applicable to this contract type")
+    rules_evaluated: int = Field(description="Number of rules that were actually evaluated")
+    rules_skipped_unverified: list[str] = Field(description="IDs of rules skipped because they are unverified")
+    review_status: Literal["complete", "partial_unverified_rules", "no_rules_verified"] = Field(
+        description="Overall verification completeness of the review"
+    )
+
+
 class ReviewResult(BaseModel):
     evaluation_date: date = Field(description="The date whose rule versions were applied.")
     findings: list[ReviewFinding]
     skipped_rules: SkippedRules = Field(description="Every rule or completeness check that did not run, and why. "
                                                     "A missing finding is only \"nothing found\" if it is not here.")
+    coverage: Coverage = Field(description="Verification coverage and completion status.")
 
 
 def evaluation_date(on: date | None = None, effective_date: date | None = None) -> date:
@@ -99,7 +110,9 @@ async def run_review(contract_text: str, contract_type_id: str, *, strict: bool 
                      for f in RuleEvaluator(list(selection.rules), today=day).evaluate(contract_text, contract_type)]
 
     checker = _checkers().get(contract_type)
+    completeness_skipped_ids: list[str] = []
     if checker and strict and not checker.verified:
+        completeness_skipped_ids = list(checker.rule_ids)
         skipped += [SkippedRule(rule_id=rule_id, version=None, reason=SkipReason.UNVERIFIED_IN_STRICT_MODE)
                     for rule_id in checker.rule_ids]
         checker = None
@@ -110,13 +123,41 @@ async def run_review(contract_text: str, contract_type_id: str, *, strict: bool 
 
     findings = sorted(rule_findings + completeness,
                       key=lambda f: (_SEVERITY_ORDER[f.severity], f.layer, f.rule_applied))
+
+    # Coverage computation
+    statutory_unverified = [s.rule_id for s in skipped if s.reason == SkipReason.UNVERIFIED_IN_STRICT_MODE
+                            and s.rule_id not in completeness_skipped_ids]
+    rules_skipped_unverified = statutory_unverified + completeness_skipped_ids
+
+    statutory_evaluated = len(selection.rules)
+    completeness_total = len(_checkers()[contract_type].config.required) if contract_type in _checkers() else 0
+    completeness_evaluated = completeness_total if (not strict or (_checkers().get(contract_type) and _checkers()[contract_type].verified)) else 0
+
+    rules_total = statutory_evaluated + len(statutory_unverified) + completeness_total
+    rules_evaluated = statutory_evaluated + completeness_evaluated
+
+    if rules_total == 0 or len(rules_skipped_unverified) == 0:
+        review_status = "complete"
+    elif rules_evaluated == 0:
+        review_status = "no_rules_verified"
+    else:
+        review_status = "partial_unverified_rules"
+
+    coverage = Coverage(
+        rules_total=rules_total,
+        rules_evaluated=rules_evaluated,
+        rules_skipped_unverified=rules_skipped_unverified,
+        review_status=review_status,
+    )
+
     reasons = Counter(s.reason.value for s in skipped)
     # Counts only: never the contract text or anything taken from it.
-    log.info("rules review: contract_type=%s strict=%s evaluation_date=%s rules_run=%d findings=%d skipped=%d %s",
+    log.info("rules review: contract_type=%s strict=%s evaluation_date=%s rules_run=%d findings=%d skipped=%d status=%s %s",
              contract_type, strict, day.isoformat(), len(selection.rules), len(findings), len(skipped),
-             " ".join(f"{k}={v}" for k, v in sorted(reasons.items())))
+             review_status, " ".join(f"{k}={v}" for k, v in sorted(reasons.items())))
     return ReviewResult(evaluation_date=day, findings=findings,
-                        skipped_rules=SkippedRules(count=len(skipped), rules=skipped))
+                        skipped_rules=SkippedRules(count=len(skipped), rules=skipped),
+                        coverage=coverage)
 
 
 async def run_review_normalized(doc: NormalizedDocument, *, strict: bool = True,

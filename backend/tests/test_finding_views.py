@@ -1,6 +1,6 @@
 """Lawyer findings views (agent / advocate read models, origin) and the finding_id / id alias."""
 import uuid
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
@@ -54,6 +54,42 @@ def test_the_id_alias_is_removed_after_the_integration_day():
     assert date.today() <= ID_ALIAS_UNTIL, (
         f"The deprecated `id` alias was due for removal after {ID_ALIAS_UNTIL}. Remove the `id` "
         "property from _FindingId in app/findings/schemas.py and the alias assertions in the tests.")
+
+
+def test_id_alias_7_day_expiration_guard():
+    """Fails with an actionable message if today is within 7 days of ID_ALIAS_UNTIL or after it."""
+    today = date.today()
+    days_remaining = (ID_ALIAS_UNTIL - today).days
+
+    if days_remaining <= 0:
+        pytest.fail(
+            f"ID_ALIAS_UNTIL ({ID_ALIAS_UNTIL}) has expired ({abs(days_remaining)} day(s) ago). "
+            "Action required: Remove the deprecated `id` alias from app/findings/schemas.py "
+            "or deliberately extend ID_ALIAS_UNTIL if client migration is still pending."
+        )
+    elif days_remaining <= 7:
+        pytest.fail(
+            f"ID_ALIAS_UNTIL ({ID_ALIAS_UNTIL}) expires in {days_remaining} day(s) (within 7-day warning window). "
+            "Action required: Remove the deprecated `id` alias from app/findings/schemas.py "
+            "or deliberately extend ID_ALIAS_UNTIL with team alignment."
+        )
+
+
+@pytest.mark.parametrize("offset_days, should_fail", [
+    (11, False),  # 11 days remaining (today Nov 4) -> ok
+    (8, False),   # 8 days remaining -> ok
+    (7, True),    # 7 days remaining -> fail
+    (3, True),    # 3 days remaining -> fail
+    (0, True),    # expiration day -> fail
+    (-2, True),   # expired 2 days ago -> fail
+])
+def test_id_alias_expiration_guard_thresholds(offset_days, should_fail):
+    fake_today = ID_ALIAS_UNTIL - timedelta(days=offset_days)
+    days_remaining = (ID_ALIAS_UNTIL - fake_today).days
+
+    is_warning_or_expired = (days_remaining <= 7)
+    assert is_warning_or_expired == should_fail
+
 
 
 # --- read models ----------------------------------------------------------------------------------

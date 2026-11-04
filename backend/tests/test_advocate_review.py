@@ -75,7 +75,39 @@ def test_apply_advocate_review_on_blank_csv_changes_nothing(tmp_path, monkeypatc
     assert applied == 0
 
 
-def test_apply_advocate_review_flips_only_verified_rows_in_isolation(tmp_path, monkeypatch):
+def test_apply_advocate_review_refusal_paths(tmp_path, monkeypatch):
+    # 1. Missing advocate name
+    csv_1 = tmp_path / "missing_advocate.csv"
+    with open(csv_1, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["category", "identifier", "verified", "advocate_name", "verification_date", "verification_ref", "staged_quote_or_description", "corrected_quote"])
+        writer.writerow(["seed_rule", "RULE_1", "yes", "", "2026-11-04", "https://indiacode.nic.in/...", "quote", "quote"])
+
+    with pytest.raises(apply_script.ReviewRefusalError, match="missing required advocate_name"):
+        apply_script.apply_review(csv_1)
+
+    # 2. Missing verification date
+    csv_2 = tmp_path / "missing_date.csv"
+    with open(csv_2, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["category", "identifier", "verified", "advocate_name", "verification_date", "verification_ref", "staged_quote_or_description", "corrected_quote"])
+        writer.writerow(["seed_rule", "RULE_1", "yes", "Adv. Rao", "", "https://indiacode.nic.in/...", "quote", "quote"])
+
+    with pytest.raises(apply_script.ReviewRefusalError, match="missing required verification_date"):
+        apply_script.apply_review(csv_2)
+
+    # 3. Corrected quote differs from staged quote without verification_ref URL
+    csv_3 = tmp_path / "quote_changed_no_ref.csv"
+    with open(csv_3, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["category", "identifier", "verified", "advocate_name", "verification_date", "verification_ref", "staged_quote_or_description", "corrected_quote"])
+        writer.writerow(["seed_rule", "RULE_1", "yes", "Adv. Rao", "2026-11-04", "", "Original staged quote", "Different corrected quote"])
+
+    with pytest.raises(apply_script.ReviewRefusalError, match="verification_ref .* is missing or invalid"):
+        apply_script.apply_review(csv_3)
+
+
+def test_apply_advocate_review_dry_run_and_success_in_isolation(tmp_path, monkeypatch):
     rules_dir = tmp_path / "rules"
     rules_dir.mkdir()
     config_dir = tmp_path / "config"
@@ -87,9 +119,21 @@ def test_apply_advocate_review_flips_only_verified_rows_in_isolation(tmp_path, m
     rule_file = rules_dir / "test_rule.json"
     rule_file.write_text(json.dumps({
         "rule_id": "TEST_RULE_1",
+        "statute": "Indian Contract Act, 1872",
+        "section": "27",
         "basis": "Original quote",
         "verification_status": "unverified"
     }))
+
+    # Create dummy seed_statutes.json
+    seed_file = config_dir / "seed_statutes.json"
+    seed_file.write_text(json.dumps([{
+        "act": "Indian Contract Act, 1872",
+        "section": "27",
+        "statute_text": "Original quote",
+        "status": "staging",
+        "source_url": "https://www.indiacode.nic.in/initial"
+    }]))
 
     # Create dummy config file
     cfg_file = config_dir / "nda_required_clauses.json"
@@ -104,31 +148,60 @@ def test_apply_advocate_review_flips_only_verified_rows_in_isolation(tmp_path, m
     monkeypatch.setattr(apply_script, "DOCS_DIR", docs_dir)
     monkeypatch.setattr(apply_script, "CHANGELOG_PATH", docs_dir / "rules_verification_changelog.md")
 
-    # Write CSV with 1 verified rule with corrected quote, and 1 verified clause
+    # Write valid review CSV with advocate info, date, ref, and corrected quote
     test_csv = tmp_path / "completed_review.csv"
     with open(test_csv, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow(["category", "identifier", "verified", "corrected_quote", "notes", "verified / corrected quote / notes"])
-        writer.writerow(["seed_rule", "TEST_RULE_1", "yes", "Corrected statutory quote", "Advocate Sharma sign-off", ""])
-        writer.writerow(["required_clause", "nda:confidentiality", "yes", "", "Standard clause", ""])
+        writer.writerow([
+            "category", "identifier", "contract_type_or_applies_to", "statute_or_context", "section_or_clause",
+            "staged_quote_or_description", "india_code_url", "plain_english_logic", "verified",
+            "advocate_name", "verification_date", "verification_ref", "corrected_quote", "notes"
+        ])
+        writer.writerow([
+            "seed_rule", "TEST_RULE_1", "nda", "Indian Contract Act, 1872", "27",
+            "Original quote", "https://www.indiacode.nic.in/old", "Logic", "yes",
+            "Advocate Sharma", "2026-11-04", "https://www.indiacode.nic.in/new", "Corrected statutory quote", "Checked"
+        ])
+        writer.writerow([
+            "required_clause", "nda:confidentiality", "nda", "Non-Disclosure Agreement (NDA)", "confidentiality",
+            "Required clause", "N/A", "Must be present", "yes",
+            "Advocate Sharma", "2026-11-04", "", "", "Confirmed"
+        ])
 
-    applied = apply_script.apply_review(test_csv)
-    assert applied == 2
+    # 1. Test Dry Run: returns count, but modifies zero files on disk
+    dry_count = apply_script.apply_review(test_csv, apply_changes=False)
+    assert dry_count == 3
+    assert json.loads(rule_file.read_text())["verification_status"] == "unverified"
+    assert json.loads(seed_file.read_text())[0]["status"] == "staging"
+    assert json.loads(cfg_file.read_text())["verification_status"] == "unverified"
+    assert not (docs_dir / "rules_verification_changelog.md").exists()
 
-    # Verify rule was updated
+    # 2. Test Apply Changes: modifies rule, seed_statutes, and config atomically
+    applied_count = apply_script.apply_review(test_csv, apply_changes=True)
+    assert applied_count == 3
+
+    # Check rule updated
     updated_rule = json.loads(rule_file.read_text())
     assert updated_rule["verification_status"] == "verified"
     assert updated_rule["basis"] == "Corrected statutory quote"
 
-    # Verify config was updated
+    # Check seed_statutes updated
+    updated_seeds = json.loads(seed_file.read_text())
+    assert updated_seeds[0]["status"] == "verified"
+    assert updated_seeds[0]["statute_text"] == "Corrected statutory quote"
+    assert updated_seeds[0]["source_url"] == "https://www.indiacode.nic.in/new"
+    assert updated_seeds[0]["verified_by"] == "Advocate Sharma"
+
+    # Check config updated
     updated_cfg = json.loads(cfg_file.read_text())
     assert updated_cfg["verification_status"] == "verified"
 
-    # Verify changelog was written
+    # Check changelog written
     changelog = (docs_dir / "rules_verification_changelog.md").read_text()
     assert "Verification Applied:" in changelog
-    assert "TEST_RULE_1" in changelog
-    assert "Advocate Sharma sign-off" in changelog
+    assert "Advocate Sharma" in changelog
+    assert "Quote Hash:" in changelog
+    assert "https://www.indiacode.nic.in/new" in changelog
 
 
 def test_repo_shipped_rules_and_configs_remain_strictly_unverified():

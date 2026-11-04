@@ -69,3 +69,4 @@ The compliance and legal team must investigate and formally resolve the followin
    - Google Gemini API calls may route across global regions if dynamic load balancing is enabled. Compliance counsel must confirm whether contract text transit across borders complies with DPDP Section 16 transfer regulations.
 4. **Data Retention & Eradication (DPDP Act s. 8(7))**:
    - Establish formal operational procedures to guarantee that transient processing buffers are purged immediately upon transaction conclusion.
+

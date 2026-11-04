@@ -46,3 +46,4 @@ def test_public_benchmark_sample_contract_loads_and_runs():
     res_demo = run_benchmark(DEFAULT_PUBLIC_DIR, strict=False)
     sample_demo_res = next(r for r in res_demo["results"] if r["name"] == "sample_gem_procurement")
     assert sample_demo_res["review_status"] == "complete"
+

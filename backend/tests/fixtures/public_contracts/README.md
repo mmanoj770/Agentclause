@@ -53,3 +53,4 @@ Run the automated evaluation benchmark runner:
 python3 scripts/benchmark_public_contracts.py
 ```
 This script executes the review layers (R2 Intake, R3 Completeness, R4/R5 Statutory Rules), measures execution runtime, and outputs a per-layer findings and coverage summary table.
+

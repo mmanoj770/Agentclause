@@ -127,3 +127,4 @@ def apply_review(csv_path: Path):
 if __name__ == "__main__":
     path = Path(sys.argv[1]) if len(sys.argv) > 1 else DOCS_DIR / "advocate_review_pack.csv"
     apply_review(path)
+

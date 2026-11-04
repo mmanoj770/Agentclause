@@ -19,3 +19,4 @@ Each party agrees to maintain confidentiality of proprietary technical informati
 
 5. TERMINATION
 Either party may terminate this Agreement by giving sixty (60) days prior written notice to the other party.
+

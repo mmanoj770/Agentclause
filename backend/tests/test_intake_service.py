@@ -330,3 +330,155 @@ def test_live_normalize_nda():
     d = normalize(NDA_TEXT, "nda")
     assert len(d.parties) >= 2
     assert {"confidentiality", "governing-law"} <= d.clause_types()
+
+
+# --- Task 3: DPDP PII Redaction & Restoration Tests --------------------------------------------
+
+PII_TEXT = """
+SERVICES AGREEMENT
+
+This Agreement is made by Acme Corp (PAN: ABCDE1234F, GSTIN: 27ABCDE1234F1Z5, Email: contact@acme.com)
+and Rahul Sharma (Aadhaar: 2345 6789 0123, Phone: +91 9876543210).
+Payment shall be made to Account: 123456789012, IFSC: HDFC0001234.
+Repeated PAN: ABCDE1234F for tax purposes.
+
+1. PAYMENT
+The client shall wire funds to Account: 123456789012 at IFSC: HDFC0001234.
+
+2. NOTICES
+Notices to Acme Corp: contact@acme.com. Phone: +91 9876543210.
+"""
+
+def test_redact_pii_detects_all_categories_with_stable_placeholders():
+    from app.intake.service import redact_pii
+    redacted, mapping, summary = redact_pii(PII_TEXT)
+
+    # Placeholders present
+    assert "[GST_1]" in redacted
+    assert "[PAN_1]" in redacted
+    assert "[AADHAAR_1]" in redacted
+    assert "[PHONE_1]" in redacted
+    assert "[EMAIL_1]" in redacted
+    assert "[IFSC_1]" in redacted
+    assert "[BANK_ACC_1]" in redacted
+
+    # Raw PII not present in redacted text
+    assert "27ABCDE1234F1Z5" not in redacted
+    assert "ABCDE1234F" not in redacted
+    assert "2345 6789 0123" not in redacted
+    assert "contact@acme.com" not in redacted
+    assert "HDFC0001234" not in redacted
+    assert "123456789012" not in redacted
+
+    # Stable placeholder for repeated PAN
+    assert mapping["[PAN_1]"] == "ABCDE1234F"
+    assert redacted.count("[PAN_1]") == 2
+
+    # Hashes in summary
+    assert "hashes" in summary and "counts" in summary
+    assert summary["counts"]["PAN"] == 1
+    assert len(summary["hashes"]["PAN"]) == 1
+
+
+def test_restore_pii_roundtrip():
+    from app.intake.service import redact_pii, restore_pii_str
+    redacted, mapping, _ = redact_pii(PII_TEXT)
+    restored = restore_pii_str(redacted, mapping)
+    assert restored == PII_TEXT
+
+
+def test_intake_normalizes_with_pii_redaction_and_verbatim_check_passes(monkeypatch, fake):
+    monkeypatch.setattr(settings, "intake_redact_pii", True)
+    # Gemini receives redacted text and echoes verbatim text with placeholders
+    canned_answer = {
+        "is_contract": True,
+        "parties": ["Acme Corp (PAN: [PAN_1])", "Rahul Sharma"],
+        "execution_date": "2026-10-15",
+        "effective_date": None,
+        "jurisdiction": "India",
+        "clauses": [
+            {
+                "clause_number": "1",
+                "heading": "PAYMENT",
+                "clause_type": "other",
+                "text": "The client shall wire funds to Account: [BANK_ACC_1] at IFSC: [IFSC_1]."
+            },
+            {
+                "clause_number": "2",
+                "heading": "NOTICES",
+                "clause_type": "other",
+                "text": "Notices to Acme Corp: [EMAIL_1]. Phone: [PHONE_1]."
+            }
+        ]
+    }
+    f = fake(canned_answer)
+    doc = normalize(PII_TEXT, "nda")
+
+    # Sent prompt has redacted text, not raw PII
+    prompt_sent = f.prompts[0]
+    assert "[PAN_1]" in prompt_sent
+    assert "contact@acme.com" not in prompt_sent
+    assert "ABCDE1234F" not in prompt_sent
+
+    # Normalized document has restored raw values
+    assert doc.parties == ["Acme Corp (PAN: ABCDE1234F)", "Rahul Sharma"]
+    assert len(doc.clauses) == 2
+    assert "Account: 123456789012 at IFSC: HDFC0001234" in doc.clauses[0].text
+    assert "contact@acme.com" in doc.clauses[1].text
+    # And verbatim substring check passed against original text!
+    assert all(c.text in doc.full_text for c in doc.clauses)
+
+
+def test_intake_redaction_disabled_when_flag_off(monkeypatch, fake):
+    monkeypatch.setattr(settings, "intake_redact_pii", False)
+    canned_answer = {
+        "is_contract": True,
+        "parties": ["Acme Corp", "Rahul Sharma"],
+        "execution_date": None,
+        "effective_date": None,
+        "jurisdiction": None,
+        "clauses": [
+            {
+                "clause_number": "1",
+                "heading": "PAYMENT",
+                "clause_type": "other",
+                "text": "The client shall wire funds to Account: 123456789012 at IFSC: HDFC0001234."
+            }
+        ]
+    }
+    f = fake(canned_answer)
+    normalize(PII_TEXT, "nda")
+    prompt_sent = f.prompts[0]
+    # Raw values sent directly when flag is false
+    assert "contact@acme.com" in prompt_sent
+    assert "ABCDE1234F" in prompt_sent
+
+
+def test_intake_logs_no_raw_pii(monkeypatch, fake, caplog):
+    monkeypatch.setattr(settings, "intake_redact_pii", True)
+    fake({
+        "is_contract": True,
+        "parties": ["Acme Corp", "Rahul Sharma"],
+        "execution_date": None,
+        "effective_date": None,
+        "jurisdiction": None,
+        "clauses": [
+            {
+                "clause_number": "1",
+                "heading": "PAYMENT",
+                "clause_type": "other",
+                "text": "The client shall wire funds to Account: [BANK_ACC_1] at IFSC: [IFSC_1]."
+            }
+        ]
+    })
+    with caplog.at_level("INFO", logger="app.intake.service"):
+        normalize(PII_TEXT, "nda")
+
+    assert "intake: redacted PII counts=" in caplog.text
+    # Raw values must NEVER appear in logs
+    assert "contact@acme.com" not in caplog.text
+    assert "ABCDE1234F" not in caplog.text
+    assert "2345 6789 0123" not in caplog.text
+    assert "9876543210" not in caplog.text
+    assert "123456789012" not in caplog.text
+

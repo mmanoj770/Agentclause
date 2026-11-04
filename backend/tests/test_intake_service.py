@@ -482,3 +482,170 @@ def test_intake_logs_no_raw_pii(monkeypatch, fake, caplog):
     assert "9876543210" not in caplog.text
     assert "123456789012" not in caplog.text
 
+
+# --- Task 6: Redaction hardening tests (currencies, dates, clauses, invoice IDs, retries) ----
+
+def test_non_redaction_of_currencies_dates_clause_numbers_and_invoices():
+    """Verify that currency amounts, clause numbers, dates, and invoice IDs are never redacted as PII."""
+    from app.intake.service import redact_pii
+
+    test_samples = [
+        # Currencies with commas and symbols
+        "Payment of 12,50,000 shall be made upon delivery.",
+        "Total consideration is Rs. 5,00,000 inclusive of taxes.",
+        "The security deposit is INR 1,25,00,000.",
+        "Late fee is Rs. 9876543210 under the agreement.",
+        "Cap amount: INR 7000000000.",
+        "Value: 7000000000 INR.",
+        "Penalty: 9876543210 rupees.",
+        # Clause numbers
+        "1. DEFINITIONS",
+        "2.1 Scope of Services",
+        "Clause 12.3.4 applies here.",
+        # Dates
+        "Executed on 2026-10-15 by the parties.",
+        "Valid until 15-10-2026.",
+        # Invoice / Reference IDs
+        "Invoice number INV-2026-001 is attached.",
+        "Reference ID: INV-9876543210.",
+        "Invoice # 9876543210.",
+        "Purchase Order INV-2024-1001-2002.",
+    ]
+
+    for sample in test_samples:
+        redacted, mapping, summary = redact_pii(sample)
+        # None of these should produce any placeholders or mappings
+        assert mapping == {}, f"Unexpected redaction for '{sample}': {mapping}"
+        assert redacted == sample, f"Sample text modified for '{sample}' -> '{redacted}'"
+
+
+def test_placeholder_alteration_triggers_retry(monkeypatch, fake):
+    """When Gemini alters [PAN_1] to [PAN_2], intake rejects it and retries."""
+    monkeypatch.setattr(settings, "intake_redact_pii", True)
+
+    garbled_attempt = {
+        "is_contract": True,
+        "parties": ["Acme Corp (PAN: [PAN_2])", "Rahul Sharma"],  # [PAN_2] was altered from [PAN_1]
+        "execution_date": "2026-10-15",
+        "effective_date": None,
+        "jurisdiction": "India",
+        "clauses": [
+            {
+                "clause_number": "1",
+                "heading": "PAYMENT",
+                "clause_type": "other",
+                "text": "The client shall wire funds to Account: [BANK_ACC_1] at IFSC: [IFSC_1]."
+            }
+        ]
+    }
+    valid_attempt = {
+        "is_contract": True,
+        "parties": ["Acme Corp (PAN: [PAN_1])", "Rahul Sharma"],  # Correct placeholder
+        "execution_date": "2026-10-15",
+        "effective_date": None,
+        "jurisdiction": "India",
+        "clauses": [
+            {
+                "clause_number": "1",
+                "heading": "PAYMENT",
+                "clause_type": "other",
+                "text": "The client shall wire funds to Account: [BANK_ACC_1] at IFSC: [IFSC_1]."
+            }
+        ]
+    }
+
+    f = fake(garbled_attempt, valid_attempt)
+    doc = normalize(PII_TEXT, "nda")
+
+    assert doc.extraction_attempts == 2
+    assert "placeholder" in f.prompts[1]
+    assert "[PAN_2]" in f.prompts[1]
+    assert doc.parties == ["Acme Corp (PAN: ABCDE1234F)", "Rahul Sharma"]
+
+
+def test_placeholder_omitted_triggers_retry(monkeypatch, fake):
+    """When Gemini omits a placeholder from clause text, verbatim check fails and intake retries."""
+    monkeypatch.setattr(settings, "intake_redact_pii", True)
+
+    omitted_attempt = {
+        "is_contract": True,
+        "parties": ["Acme Corp (PAN: [PAN_1])", "Rahul Sharma"],
+        "execution_date": "2026-10-15",
+        "effective_date": None,
+        "jurisdiction": "India",
+        "clauses": [
+            {
+                "clause_number": "1",
+                "heading": "PAYMENT",
+                "clause_type": "other",
+                # Model omitted [BANK_ACC_1] placeholder
+                "text": "The client shall wire funds to Account: at IFSC: [IFSC_1]."
+            }
+        ]
+    }
+    valid_attempt = {
+        "is_contract": True,
+        "parties": ["Acme Corp (PAN: [PAN_1])", "Rahul Sharma"],
+        "execution_date": "2026-10-15",
+        "effective_date": None,
+        "jurisdiction": "India",
+        "clauses": [
+            {
+                "clause_number": "1",
+                "heading": "PAYMENT",
+                "clause_type": "other",
+                "text": "The client shall wire funds to Account: [BANK_ACC_1] at IFSC: [IFSC_1]."
+            }
+        ]
+    }
+
+    f = fake(omitted_attempt, valid_attempt)
+    doc = normalize(PII_TEXT, "nda")
+
+    assert doc.extraction_attempts == 2
+    assert "copy it exactly" in f.prompts[1]
+    assert "123456789012" in doc.clauses[0].text
+
+
+def test_redaction_logs_contain_only_counts_and_8char_hashes(monkeypatch, fake, caplog):
+    """Assert log format has exact counts and 8-character hashes with zero raw PII."""
+    import re
+    monkeypatch.setattr(settings, "intake_redact_pii", True)
+
+    fake({
+        "is_contract": True,
+        "parties": ["Acme Corp", "Rahul Sharma"],
+        "execution_date": None,
+        "effective_date": None,
+        "jurisdiction": None,
+        "clauses": [
+            {
+                "clause_number": "1",
+                "heading": "PAYMENT",
+                "clause_type": "other",
+                "text": "The client shall wire funds to Account: [BANK_ACC_1] at IFSC: [IFSC_1]."
+            }
+        ]
+    })
+
+    with caplog.at_level("INFO", logger="app.intake.service"):
+        normalize(PII_TEXT, "nda")
+
+    redact_log = next(r.message for r in caplog.records if "intake: redacted PII counts=" in r.message)
+    # Check that counts and hashes are logged
+    assert "counts=" in redact_log and "hashes=" in redact_log
+
+    # Extract all hashes from the log record
+    hash_matches = re.findall(r"'([a-f0-9]{8})'", redact_log)
+    assert len(hash_matches) >= 5, f"Expected at least 5 hashes in log, found: {hash_matches}"
+    # Verify every hash is exactly 8 hex characters
+    for h in hash_matches:
+        assert len(h) == 8
+        assert all(c in "0123456789abcdef" for c in h)
+
+    # Ensure no raw PII in any log record
+    for record in caplog.records:
+        for raw in ["27ABCDE1234F1Z5", "ABCDE1234F", "2345 6789 0123", "contact@acme.com", "HDFC0001234", "123456789012", "9876543210"]:
+            assert raw not in record.message
+
+

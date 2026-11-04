@@ -25,6 +25,17 @@ To minimise the exposure of sensitive Indian Personal Identifiable Information (
 - Non-redacted business contract clauses, general operational terms, dates, and governing law clauses.
 - Redacted placeholder tokens (e.g., `[PAN_1]`, `[AADHAAR_1]`, `[PHONE_1]`, `[EMAIL_1]`, `[BANK_ACC_1]`, `[IFSC_1]`, `[GST_1]`).
 
+> [!WARNING]
+> ### Explicit Scope Limitation: "Redaction ON" Does NOT Mean Zero Personal Data
+> The redaction engine is regex-based and targets strictly structured identifiers (PAN, GSTIN, Aadhaar, IFSC, Bank Account Numbers, Emails, Phone Numbers).
+> The following data categories are **NOT redacted** and **still leave the system** in the payload sent to the external Google Gemini API:
+> - **Corporate and Entity Names**: e.g., "Tata Consultancy Services Ltd", "Acme Technologies Private Limited".
+> - **Party & Signatory Names**: Individual personal names (e.g., "Rajesh Sharma, Director", "Priya Verma, Founder").
+> - **Physical Addresses & Locations**: Registered office addresses, postal pin codes, city/state lines.
+> - **Free-Text Personal Data**: Any unstructured personal data embedded in commercial or operational clauses (e.g., employee titles, compensation narratives, background descriptions).
+>
+> Enabling redaction (`INTAKE_REDACT_PII=True`) lowers the exposure of high-risk statutory and financial identifiers, but does **not** render the document anonymous or free of personal data under the DPDP Act 2023.
+
 ### What Stays Strictly Local (Never Transmitted Outside Server Boundary)
 - **Raw PII Values**: Stored only in local server process memory during the request lifecycle.
 - **Redaction Mapping Table**: Transient dictionary mapping placeholders to raw PII (`{"[PAN_1]": "ABCDE1234F"}`). Kept in local memory and discarded once extraction completes.

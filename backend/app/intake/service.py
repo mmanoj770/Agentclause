@@ -29,9 +29,18 @@ _GST_RE = re.compile(r"\b\d{2}[A-Z]{5}\d{4}[A-Z]{1}[A-Z\d]{1}Z[A-Z\d]{1}\b")
 _PAN_RE = re.compile(r"\b[A-Z]{5}[0-9]{4}[A-Z]\b")
 _AADHAAR_RE = re.compile(r"\b[2-9]\d{3}[\s-]?\d{4}[\s-]?\d{4}\b")
 _IFSC_RE = re.compile(r"\b[A-Z]{4}0[A-Z0-9]{6}\b")
-_BANK_ACC_RE = re.compile(r"(?i:\b(?:a/c|account|acc(?:\s*no\.?)?)\s*[:#-]?\s*)(\d{9,18})\b")
+_BANK_ACC_RE = re.compile(r"(?i:\b(?:a/c|account|acc)(?:\s*(?:no|number)\.?)?\s*[:#-]?\s*)(\d{9,18})\b")
 _EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
 _PHONE_RE = re.compile(r"(?:\+91[\s-]?)?[6-9]\d{9}\b")
+
+# Context guards to prevent false-positive redaction of currencies, invoice IDs, dates, and clause numbers
+_CURRENCY_PREFIX_RE = re.compile(r"(?i)(?:\b(?:rs|inr|usd|eur|gbp)\b|rs\.|[₹$€£])\s*$")
+_CURRENCY_SUFFIX_RE = re.compile(r"(?i)^\s*(?:lakh|crore|thousand|hundred|rupees|inr|usd)")
+_INVOICE_PREFIX_RE = re.compile(r"(?i)\b(?:inv|invoice|bill|order|ref|po|p\.o\.)[\s#:-]*$")
+_ID_OR_HYPHEN_PREFIX_RE = re.compile(r"[A-Za-z0-9_/-]$")
+_COMMA_DIGIT_SUFFIX = re.compile(r"^,\d")
+_DIGIT_COMMA_PREFIX = re.compile(r"\d,\s*$")
+_PH_TOKEN_RE = re.compile(r"\[(?:GST|PAN|AADHAAR|IFSC|BANK_ACC|EMAIL|PHONE)_\d+\]")
 
 
 def short_hash(val: str) -> str:
@@ -67,8 +76,12 @@ def redact_pii(text: str) -> tuple[str, dict[str, str], dict]:
         return get_placeholder("PAN", m.group(0))
     redacted = _PAN_RE.sub(repl_pan, redacted)
 
-    # 3. Aadhaar
+    # 3. Aadhaar (guard against invoice IDs like INV-2024-1001-2002)
     def repl_aadhaar(m):
+        start = m.start()
+        prefix = redacted[max(0, start - 25):start]
+        if _ID_OR_HYPHEN_PREFIX_RE.search(prefix) or _INVOICE_PREFIX_RE.search(prefix):
+            return m.group(0)
         return get_placeholder("AADHAAR", m.group(0))
     redacted = _AADHAAR_RE.sub(repl_aadhaar, redacted)
 
@@ -77,10 +90,17 @@ def redact_pii(text: str) -> tuple[str, dict[str, str], dict]:
         return get_placeholder("IFSC", m.group(0))
     redacted = _IFSC_RE.sub(repl_ifsc, redacted)
 
-    # 5. Bank Account Number (preserve prefix, replace digits)
+    # 5. Bank Account Number (preserve prefix, replace digits; protect currency and comma formats)
     def repl_bank(m):
         acc_num = m.group(1)
         full_match = m.group(0)
+        start_digits = m.start(1)
+        prefix = redacted[max(0, start_digits - 25):start_digits]
+        suffix = redacted[m.end(1):min(len(redacted), m.end(1) + 25)]
+        if _CURRENCY_PREFIX_RE.search(prefix) or _CURRENCY_SUFFIX_RE.search(suffix):
+            return full_match
+        if _DIGIT_COMMA_PREFIX.search(prefix) or _COMMA_DIGIT_SUFFIX.search(suffix):
+            return full_match
         ph = get_placeholder("BANK_ACC", acc_num)
         return full_match[:m.start(1) - m.start(0)] + ph
     redacted = _BANK_ACC_RE.sub(repl_bank, redacted)
@@ -90,8 +110,20 @@ def redact_pii(text: str) -> tuple[str, dict[str, str], dict]:
         return get_placeholder("EMAIL", m.group(0))
     redacted = _EMAIL_RE.sub(repl_email, redacted)
 
-    # 7. Phone
+    # 7. Phone (guard against currency, invoice IDs, dates, clause numbers)
     def repl_phone(m):
+        start = m.start()
+        end = m.end()
+        prefix = redacted[max(0, start - 25):start]
+        suffix = redacted[end:min(len(redacted), end + 25)]
+        if _ID_OR_HYPHEN_PREFIX_RE.search(prefix):
+            return m.group(0)
+        if _CURRENCY_PREFIX_RE.search(prefix) or _CURRENCY_SUFFIX_RE.search(suffix):
+            return m.group(0)
+        if _INVOICE_PREFIX_RE.search(prefix):
+            return m.group(0)
+        if _DIGIT_COMMA_PREFIX.search(prefix) or _COMMA_DIGIT_SUFFIX.search(suffix):
+            return m.group(0)
         return get_placeholder("PHONE", m.group(0))
     redacted = _PHONE_RE.sub(repl_phone, redacted)
 
@@ -262,6 +294,28 @@ def normalize(contract_text: str, contract_type_id: str = "nda", *, max_attempts
             raise NotAContractError("The text does not appear to be a contract.")
 
         if pii_mapping:
+            unmapped = set()
+            for c in extracted.clauses:
+                for token in _PH_TOKEN_RE.findall(c.text):
+                    if token not in pii_mapping:
+                        unmapped.add(token)
+            for p in extracted.parties:
+                for token in _PH_TOKEN_RE.findall(p):
+                    if token not in pii_mapping:
+                        unmapped.add(token)
+            if extracted.jurisdiction:
+                for token in _PH_TOKEN_RE.findall(extracted.jurisdiction):
+                    if token not in pii_mapping:
+                        unmapped.add(token)
+            if unmapped:
+                feedback = (
+                    f"placeholder(s) {sorted(unmapped)} are invalid or were altered; "
+                    "preserve all placeholders like [PAN_1] exactly as written in the contract"
+                )
+                logger.warning("intake: garbled placeholder(s) %s from %s (attempt %d/%d)",
+                               sorted(unmapped), model, attempt, max_attempts)
+                continue
+
             extracted = restore_extracted_output(extracted, pii_mapping)
 
         clauses = [c for c in extracted.clauses if c.text in text]

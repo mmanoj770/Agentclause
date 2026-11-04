@@ -515,6 +515,8 @@ def test_reviews_endpoint_requires_login(client):
 def test_coverage_none_verified_in_strict_mode():
     res = outcome(NDA_NO_GOVERNING_LAW, strict=True)
     assert res.coverage.review_status == "no_rules_verified"
+    assert res.review_status == "no_rules_verified"
+    assert res.review_status != "complete"
     assert res.coverage.rules_total > 0
     assert res.coverage.rules_evaluated == 0
     assert len(res.coverage.rules_skipped_unverified) == res.coverage.rules_total
@@ -533,6 +535,8 @@ def test_coverage_some_unverified_in_strict_mode(monkeypatch):
     )
     res = outcome(NDA_WITH_RESTRAINT, strict=True)
     assert res.coverage.review_status == "partial_unverified_rules"
+    assert res.review_status == "partial_unverified_rules"
+    assert res.review_status != "complete"
     assert res.coverage.rules_evaluated > 0
     assert len(res.coverage.rules_skipped_unverified) > 0
     assert res.coverage.rules_total == res.coverage.rules_evaluated + len(res.coverage.rules_skipped_unverified)
@@ -549,8 +553,24 @@ def test_coverage_all_verified_in_strict_mode(monkeypatch):
     monkeypatch.setattr(checker.config, "verification_status", VerificationStatus.VERIFIED)
     res = outcome(NDA_WITH_RESTRAINT, strict=True)
     assert res.coverage.review_status == "complete"
+    assert res.review_status == "complete"
     assert res.coverage.rules_skipped_unverified == []
     assert res.coverage.rules_evaluated == res.coverage.rules_total
+
+
+def test_reviews_endpoint_returns_coverage_and_distinguishable_statuses(client, logged_in):
+    r = post_review(client, NDA_NO_GOVERNING_LAW, "?strict=true")
+    assert r.status_code == 200
+    body = r.json()
+    assert "coverage" in body
+    assert "review_status" in body
+    assert body["review_status"] == "no_rules_verified"
+    assert body["coverage"]["review_status"] == "no_rules_verified"
+    assert body["status"] == "no_verified_rules_matched"
+    # Never reports complete or ok
+    assert body["review_status"] != "complete"
+    assert body["status"] != "ok"
+
 
 
 def test_coverage_demo_mode_is_complete():

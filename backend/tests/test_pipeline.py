@@ -78,7 +78,7 @@ def test_placeholder_r6_and_r7_add_no_findings_but_the_r7_score_reaches_triage(d
 
 
 def test_r7_is_skipped_when_our_side_is_not_known(db):
-    assert run(db)["layers"]["R7_asymmetry"] == {"ms": 0.0, "skipped": "no_side"}
+    assert run(db)["layers"]["R7_asymmetry"] == {"ms": 0.0, "skipped": "no_side", "side_unknown": True}
 
 
 def test_only_what_the_gate_passes_is_saved_and_each_block_is_logged(db, verified_rules):

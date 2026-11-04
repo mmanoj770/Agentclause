@@ -341,3 +341,25 @@ def test_match_party_to_org(org_name, parties, expected_match, caplog):
     if org_name == "Star Enterprises":
         assert "org matching ambiguous" in caplog.text
 
+
+# --- Task 7: Safe failure surfaces (side unknown & provisional flag) --------------------------
+
+def test_side_none_returns_side_unknown_and_zero_findings():
+    d = doc(ONE_SIDED_TERMINATION)
+    res = run_risk_asymmetry(d, our_side=None, llm=None)
+    assert res.side_unknown is True
+    assert res.score == 0.0
+    assert len(res.findings) == 0
+    assert len(res.clauses) == 0
+    assert res.provisional is True
+    assert "PLACEHOLDER" in res.provisional_reason
+
+
+def test_asymmetry_provisional_flag_when_placeholder():
+    d = doc(ONE_SIDED_TERMINATION)
+    res = run_risk_asymmetry(d, our_side=SUPPLIER, llm=None)
+    assert res.side_unknown is False
+    assert res.provisional is True
+    assert res.provisional_reason is not None
+
+

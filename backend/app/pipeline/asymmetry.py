@@ -426,6 +426,9 @@ class AsymmetryResult:
     findings: list[Finding]
     provisions: list[Provision]
     baseline_is_stub: bool
+    side_unknown: bool = False
+    provisional: bool = False
+    provisional_reason: str | None = None
 
 
 def _signed(p: Provision, our_side: str, weight: float) -> float:
@@ -435,18 +438,33 @@ def _signed(p: Provision, our_side: str, weight: float) -> float:
     return weight if (p.kind in BURDENS) == on_us else -weight
 
 
-def run_risk_asymmetry(doc: NormalizedDocument, our_side: str, *, config: AsymmetryConfig | None = None,
+def run_risk_asymmetry(doc: NormalizedDocument, our_side: str | None, *, config: AsymmetryConfig | None = None,
                        baselines: BaselineProvider | None = None,
                        llm: Callable[..., dict] | None = _gemini_llm) -> AsymmetryResult:
     """Score the contract from our_side (one of doc.parties) and emit findings for one-sided clauses.
 
+    If our_side is None, returns side_unknown=True and 0 findings safely.
     llm=None turns the Gemini fallback off. A failed fallback call is logged and the sentences stay unplaced.
     """
+    config = config or _default_config()
+    baselines = baselines or baseline_provider(config)
+
+    if our_side is None:
+        log.warning("risk asymmetry: side is unknown/None; emitting zero asymmetry findings with side_unknown=True")
+        return AsymmetryResult(
+            score=0.0,
+            clauses=[],
+            findings=[],
+            provisions=[],
+            baseline_is_stub=baselines.is_stub,
+            side_unknown=True,
+            provisional=config.is_placeholder,
+            provisional_reason="Config status is PLACEHOLDER; weights provisional pending counsel verification" if config.is_placeholder else None,
+        )
+
     if our_side not in doc.parties:
         raise ValueError("our_side must be one of the parties intake found")
     started = time.monotonic()
-    config = config or _default_config()
-    baselines = baselines or baseline_provider(config)
     weights = config.weights
     contract_type = doc.document_type.value
 
@@ -505,5 +523,13 @@ def run_risk_asymmetry(doc: NormalizedDocument, our_side: str, *, config: Asymme
              rule_count, llm_count, rejected, score, len(findings), baselines.is_stub,
              (time.monotonic() - started) * 1000)
     by_number = lambda c: tuple(int(n) for n in c.clause_number.split("."))  # noqa: E731  "7" before "10"
-    return AsymmetryResult(score=score, clauses=sorted(per_clause.values(), key=by_number),
-                           findings=findings, provisions=provisions, baseline_is_stub=baselines.is_stub)
+    return AsymmetryResult(
+        score=score,
+        clauses=sorted(per_clause.values(), key=by_number),
+        findings=findings,
+        provisions=provisions,
+        baseline_is_stub=baselines.is_stub,
+        side_unknown=False,
+        provisional=config.is_placeholder,
+        provisional_reason="Config status is PLACEHOLDER; weights provisional pending counsel verification" if config.is_placeholder else None,
+    )

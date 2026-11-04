@@ -77,6 +77,9 @@ class ReviewResult(BaseModel):
     skipped_rules: SkippedRules = Field(description="Every rule or completeness check that did not run, and why. "
                                                     "A missing finding is only \"nothing found\" if it is not here.")
     coverage: Coverage = Field(description="Verification coverage and completion status.")
+    review_status: Literal["complete", "partial_unverified_rules", "no_rules_verified"] = Field(
+        description="Overall verification completeness of the review, mirroring coverage.review_status."
+    )
 
 
 def evaluation_date(on: date | None = None, effective_date: date | None = None) -> date:
@@ -157,7 +160,8 @@ async def run_review(contract_text: str, contract_type_id: str, *, strict: bool 
              review_status, " ".join(f"{k}={v}" for k, v in sorted(reasons.items())))
     return ReviewResult(evaluation_date=day, findings=findings,
                         skipped_rules=SkippedRules(count=len(skipped), rules=skipped),
-                        coverage=coverage)
+                        coverage=coverage,
+                        review_status=review_status)
 
 
 async def run_review_normalized(doc: NormalizedDocument, *, strict: bool = True,

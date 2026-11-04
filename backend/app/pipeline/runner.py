@@ -210,11 +210,17 @@ def run_layers(conn, document_id, version_id, doc_type: str, deps: PipelineDeps)
     side = layer("R7_side", lambda: deps.our_side(conn, document_id, doc))
     if side is None:
         r7_findings, score = [], 0.0
-        stats["R7_asymmetry"] = {"ms": 0.0, "skipped": "no_side"}
+        stats["R7_asymmetry"] = {"ms": 0.0, "skipped": "no_side", "side_unknown": True}
     else:
         r7 = layer("R7_asymmetry", lambda: asymmetry.run_risk_asymmetry(doc, side, llm=deps.asymmetry_llm))
         r7_findings, score = _strict(r7.findings, asymmetry._default_config()), r7.score
-        stats["R7_asymmetry"].update(findings=len(r7_findings), raw=len(r7.findings), score=score)
+        stats["R7_asymmetry"].update(
+            findings=len(r7_findings),
+            raw=len(r7.findings),
+            score=score,
+            side_unknown=r7.side_unknown,
+            provisional=r7.provisional,
+        )
 
     findings = list(review.findings) + r6_findings + r7_findings
     gated = layer("R8_citation_gate", lambda: screen_findings(findings, document_id, corpus=deps.corpus,

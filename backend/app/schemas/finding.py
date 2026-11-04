@@ -101,8 +101,9 @@ class Finding(BaseModel):
     )
     description: str = Field(min_length=1, description="Plain-language statement of the issue.")
     rule_applied: str = Field(
-        pattern=r"^[A-Z][A-Z0-9_]*$", max_length=100,
-        description="Visible rule ID that triggered the finding, e.g. \"NDA_GOVERNING_LAW_MISSING\".",
+        pattern=r"^[A-Z][A-Z0-9_]*(@[1-9][0-9]*)?$", max_length=100,
+        description="Visible rule ID that triggered the finding, with the rule version when the rule has one, "
+                    "e.g. \"ICA_S27_RESTRAINT_OF_TRADE@1\" or \"NDA_GOVERNING_LAW_MISSING\".",
     )
     remedy_suggested: str = Field(min_length=1, description="What to change to resolve the issue.")
     citation: str = Field(

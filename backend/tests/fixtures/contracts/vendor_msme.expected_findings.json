@@ -1,0 +1,17 @@
+{
+  "contract_type": "vendor_supplier",
+  "planted_defects": [
+    {"defect": "Payment within 90 days of acceptance (clause 4)", "rule_id": "MSMED_S15_PAYMENT_BEYOND_45_DAYS"},
+    {"defect": "No interest on delayed payment (clause 5)", "rule_id": "MSMED_S16_INTEREST_WAIVER"}
+  ],
+  "demo": [
+    {"rule_applied": "MSMED_S15_PAYMENT_BEYOND_45_DAYS@1", "layer": "STATUTORY", "severity": "low"},
+    {"rule_applied": "MSMED_S16_INTEREST_WAIVER@1", "layer": "STATUTORY", "severity": "low"}
+  ],
+  "strict": [],
+  "layers": {
+    "R3_completeness": [],
+    "R4_R5_rules": ["MSMED_S15_PAYMENT_BEYOND_45_DAYS@1", "MSMED_S16_INTEREST_WAIVER@1"]
+  },
+  "gate_blocked_known_gaps": []
+}

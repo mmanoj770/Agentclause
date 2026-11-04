@@ -1,0 +1,14 @@
+{
+  "contract_type": "nda",
+  "verification_status": "unverified",
+  "required": [
+    {"clause": "governing-law", "severity": "high"},
+    {"clause": "confidentiality", "severity": "critical"},
+    {"clause": "confidential-info-definition", "severity": "high"},
+    {"clause": "obligations", "severity": "high"},
+    {"clause": "exclusions", "severity": "medium"},
+    {"clause": "term", "severity": "medium"},
+    {"clause": "return-destruction", "severity": "medium"},
+    {"clause": "residuals", "severity": "low"}
+  ]
+}

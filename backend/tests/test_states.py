@@ -21,3 +21,10 @@ def test_only_system_delivers():
     for (frm, to), who in TRANSITIONS.items():
         if to == DocState.DELIVERED:
             assert who == {"system"}
+
+
+def test_a_failed_ai_review_goes_back_only_to_a_reviewable_state_and_only_by_the_system():
+    # R10: the pipeline returns a document it couldn't review to the state the review started from.
+    out_of_review = {to: who for (frm, to), who in TRANSITIONS.items() if frm == DocState.UNDER_AI_REVIEW}
+    assert set(out_of_review) == {DocState.PENDING_LAWYER_REVIEW, DocState.DRAFTED, DocState.REVISION_IN_PROGRESS}
+    assert all(who == frozenset({"system"}) for who in out_of_review.values())

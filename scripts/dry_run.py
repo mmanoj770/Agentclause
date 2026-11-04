@@ -17,6 +17,7 @@ Thursday cleanup can list them explicitly. Reuses the helpers in e2e_upload.py.
 """
 import argparse
 import sys
+import time
 import uuid
 from pathlib import Path
 
@@ -31,6 +32,7 @@ from app.config import ROOT  # noqa: E402
 report, skip, detail = e2e.report, e2e.skip, e2e.api_detail
 CLIENT_KEYS = {"finding_id", "id", "severity", "clause_reference", "description", "remedy_suggested",
                "citation", "citation_type", "status", "origin"}
+REVIEW_TIMEOUT_S = 180   # the R10 pipeline runs in the background; poll the document state until then
 HIDDEN_FROM_CLIENT = ("layer", "rule_applied", "advocate_notes", "adjudicated_by", "adjudicated_at")
 
 
@@ -105,17 +107,28 @@ def run(client, tokens: dict, ctx: dict) -> None:
     r = client.get(f"/documents/{doc}", headers=b)
     report("2", "startup B cannot open A's document (404)", r.status_code == 404, detail(r))
 
-    # 3. the stub review, through the Layer 5 gate
+    # 3. the AI review (R10 pipeline, in the background), through the Layer 5 gate
     r = client.post(f"/documents/{doc}/review", headers=a)
-    body = r.json() if r.status_code == 200 else {}
-    created, blocked = body.get("findings_created") or 0, body.get("findings_blocked") or 0
-    if not report("3", "review -> 200, pending_lawyer_review, at least one finding stored",
-                  r.status_code == 200 and body.get("state") == "pending_lawyer_review" and created > 0,
-                  detail(r) if r.status_code != 200 else f"stored {created}, blocked {blocked}"):
+    if not report("3", "review -> 202, under_ai_review", r.status_code == 202
+                  and r.json().get("state") == "under_ai_review", detail(r)):
         return
-    logged = [x for x in e2e.audit_rows(doc) if x["action"] == "citation_blocked"]
-    report("3", "every blocked finding left a citation_blocked audit row", len(logged) == blocked,
-           f"{blocked} blocked, {len(logged)} logged")
+    state, waited = "under_ai_review", 0.0
+    while state == "under_ai_review" and waited < REVIEW_TIMEOUT_S:
+        time.sleep(1.0)
+        waited += 1.0
+        state = (client.get(f"/documents/{doc}", headers=a).json() or {}).get("state")
+    rows = e2e.audit_rows(doc)
+    failed = [x for x in rows if x["action"] == "ai_review_failed"]
+    if not report("3", "the pipeline finished: pending_lawyer_review", state == "pending_lawyer_review",
+                  f"state {state} after {waited:.0f}s" + (f"; failed in {failed[-1]['details'].get('layer')} "
+                                                          f"({failed[-1]['details'].get('error_type')})" if failed else "")):
+        return
+    created_rows = [x for x in rows if x["action"] == "findings_created"]
+    created = created_rows[-1]["details"].get("count", 0) if created_rows else 0
+    blocked = sum(1 for x in rows if x["action"] == "citation_blocked")
+    # Strict mode is the production default: while every rule is unverified, 0 findings is the expected answer.
+    report("3", "findings_created recorded (0 is expected while every rule is unverified)", bool(created_rows),
+           f"stored {created}, blocked {blocked}")
 
     # 4. before sign-off the client view refuses, and shows nothing
     r = client.get(f"/documents/{doc}/client-findings", headers=a)

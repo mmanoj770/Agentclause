@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from contextlib import contextmanager
 
 from app.agents import citation_gate, fixtures, service
+from app.pipeline import runner
 from app.auth.dependencies import CurrentUser, get_current_user
 from app.db import get_conn
 from app.main import app
@@ -38,6 +39,9 @@ class FakeConn:
             def __exit__(s, *a): return False
         return Tx()
 
+    def commit(self):
+        self.commits = getattr(self, "commits", 0) + 1
+
     def execute(self, sql, params=()):
         s = " ".join(sql.split())
         if s.startswith("select * from documents where id"):
@@ -46,6 +50,8 @@ class FakeConn:
             return Result([self.version] if self.version else [])
         if s.startswith("select 1 from document_versions where id"):
             return Result([{"?column?": 1}] if self.version and params[0] == self.version["id"] else [])
+        if s.startswith("select (now() - updated_at) > %s as stale from documents"):
+            return Result([{"stale": False}])                # a run in progress, not a crashed one
         if s.startswith("select 1 from findings where document_version_id"):
             return Result([{"?column?": 1}] if any(f["document_version_id"] == params[0]
                                                     for f in self.findings) else [])
@@ -94,6 +100,9 @@ def env(monkeypatch):
         return conn.doc
 
     monkeypatch.setattr(service, "transition", fake_transition)
+    monkeypatch.setattr(runner, "transition", fake_transition)
+    conn.scheduled = []    # the review route only schedules the pipeline; tests/test_pipeline.py runs it
+    monkeypatch.setattr(runner, "run_pipeline", lambda *args, **kw: conn.scheduled.append(args))
     state = {"user": CurrentUser(id=str(uuid.uuid4()), email=None, role="startup_user", org_id=ORG_A)}
     app.dependency_overrides[get_current_user] = lambda: state["user"]
     app.dependency_overrides[get_conn] = lambda: conn
@@ -109,17 +118,13 @@ def test_fixture_findings_are_valid_r1_findings():
     assert len({f.finding_id for f in findings}) == len(findings)
 
 
-def test_review_moves_document_to_lawyer_queue_and_stores_findings(env):
+def test_review_starts_the_pipeline_in_the_background(env):
     r = env.client.post(f"/documents/{DOC}/review")
-    assert r.status_code == 200
-    # CPC s.20 is in the stub corpus; the one planted fake (ICA s. 999) is blocked: 4 stored, 1 blocked.
-    assert r.json() == {"state": "pending_lawyer_review", "version_no": 1,
-                        "findings_created": 4, "findings_blocked": 1}
-    assert env.conn.moves == ["under_ai_review", "pending_lawyer_review"]
-    assert len(env.conn.findings) == r.json()["findings_created"]
-    assert all(f["document_version_id"] == env.conn.version["id"] for f in env.conn.findings)
-    assert all(f["advocate_action"] is None and f["citation"] and f["citation_type"]
-               for f in env.conn.findings)
+    assert r.status_code == 202 and r.json() == {"state": "under_ai_review", "version_no": 1}
+    assert env.conn.moves == ["under_ai_review"] and env.conn.commits == 1
+    # The pipeline (R10) runs after the response: it owns the findings and the move to the lawyer queue.
+    assert env.conn.scheduled == [(uuid.UUID(DOC), env.conn.version["id"], "drafted")]
+    assert env.conn.findings == []
 
 
 def test_review_needs_an_uploaded_version(env):
@@ -237,59 +242,40 @@ def test_lawyer_cannot_draft(env):
 
 
 def test_second_review_of_the_same_version_is_409_and_adds_nothing(env):
-    assert env.client.post(f"/documents/{DOC}/review").status_code == 200
-    stored, moves = len(env.conn.findings), list(env.conn.moves)
+    assert env.client.post(f"/documents/{DOC}/review").status_code == 202
+    env.conn.findings.append({"document_version_id": env.conn.version["id"]})  # what the pipeline saved
+    moves = list(env.conn.moves)
     env.conn.doc["state"] = "revision_in_progress"  # reviewable again, but no revised version uploaded
     r = env.client.post(f"/documents/{DOC}/review")
     assert r.status_code == 409 and "already been reviewed" in r.json()["detail"]
-    assert len(env.conn.findings) == stored and env.conn.moves == moves
+    assert env.conn.moves == moves and len(env.conn.scheduled) == 1
+
+
+def test_a_second_click_while_the_review_runs_is_rejected(env):
+    assert env.client.post(f"/documents/{DOC}/review").status_code == 202
+    r = env.client.post(f"/documents/{DOC}/review")         # document is now under_ai_review
+    assert r.status_code == 409 and len(env.conn.scheduled) == 1
 
 
 def test_review_allowed_again_on_a_new_version(env):
-    assert env.client.post(f"/documents/{DOC}/review").status_code == 200
+    assert env.client.post(f"/documents/{DOC}/review").status_code == 202
     env.conn.doc["state"] = "revision_in_progress"
     env.conn.version = {"id": uuid.uuid4(), "version_no": 2}
     r = env.client.post(f"/documents/{DOC}/review")
-    assert r.status_code == 200 and r.json()["version_no"] == 2
+    assert r.status_code == 202 and r.json()["version_no"] == 2
+    assert env.conn.scheduled[-1] == (uuid.UUID(DOC), env.conn.version["id"], "revision_in_progress")
 
 
-@pytest.mark.parametrize("route,body", [("review", None), ("draft", DRAFT_BODY)])
-def test_other_doc_types_are_422_until_they_have_an_agent(env, route, body):
+def test_review_runs_for_any_contract_type_but_drafting_is_nda_only(env):
     env.conn.doc["doc_type"] = "employment_agreement"
-    r = env.client.post(f"/documents/{DOC}/{route}", json=body)
+    assert env.client.post(f"/documents/{DOC}/review").status_code == 202   # the pipeline has rules for many types
+    env.conn.doc["state"] = "drafted"
+    r = env.client.post(f"/documents/{DOC}/draft", json=DRAFT_BODY)
     assert r.status_code == 422 and "only available for NDAs" in r.json()["detail"]
-    assert env.conn.findings == [] and env.conn.moves == [] and env.conn.audit == []
 
 
-# ---- the Layer 5 citation gate in the review path ------------------------------------------------
-
-def test_review_stores_only_what_the_gate_passed_and_logs_the_block(env):
-    assert env.client.post(f"/documents/{DOC}/review").status_code == 200
-    stored = {f["rule_applied"] for f in env.conn.findings}
-    assert stored == {"NDA_GOVERNING_LAW_MISSING", "NDA_NON_COMPETE_VOID", "NDA_PENALTY_CLAUSE",
-                      "NDA_DEFINITION_MISMATCH"}
-    assert "NDA_PLANTED_FAKE_CITATION" not in stored          # blocked: never stored, never shown
-    (row,) = env.conn.gate_audit.rows
-    assert row["action"] == "citation_blocked" and env.conn.gate_audit.committed
-    assert row["details"]["rule_applied"] == "NDA_PLANTED_FAKE_CITATION"
-    assert row["details"]["reason"] == "not_in_corpus"
-    findings_created = [a for a in env.conn.audit if a[3] == "findings_created"]
-    assert findings_created[0][4].obj["count"] == 4 and findings_created[0][4].obj["blocked"] == 1
-
-
-def test_an_unreadable_corpus_is_a_generic_503_before_anything_changes(env, monkeypatch):
-    monkeypatch.setattr(citation_gate, "default_corpus", lambda: citation_gate.StubFixtureCorpus(statutes={}))
-    r = env.client.post(f"/documents/{DOC}/review")
-    assert r.status_code == 503 and r.json()["detail"] == citation_gate.GENERIC_503
-    assert env.conn.moves == [] and env.conn.findings == []          # no state moved, nothing stored
-    assert env.conn.doc["state"] == "drafted"
-    (row,) = env.conn.gate_audit.rows
-    assert row["action"] == "citation_gate_aborted"
-    # A retry once the corpus is back starts from a clean slate.
-    monkeypatch.undo()
-    monkeypatch.setattr(service, "transition", lambda c, d, t, a, n=None: env.conn.doc)
-    monkeypatch.setattr(citation_gate, "_pool_connection", env.conn.gate_audit.connection)
-    assert env.client.post(f"/documents/{DOC}/review").status_code == 200
+# The gate in the review path (only passed findings stored, blocks logged, an unreadable corpus failing the
+# review cleanly) is tested on the pipeline itself: tests/test_pipeline.py.
 
 
 def test_the_one_write_path_takes_gate_results_and_refuses_advocate_origin():

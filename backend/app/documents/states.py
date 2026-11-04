@@ -18,6 +18,9 @@ SYSTEM, STARTUP, LAWYER = "system", "startup_user", "lawyer"
 TRANSITIONS: dict[tuple[DocState, DocState], frozenset[str]] = {
     (DocState.DRAFTED, DocState.UNDER_AI_REVIEW): frozenset({SYSTEM}),
     (DocState.UNDER_AI_REVIEW, DocState.PENDING_LAWYER_REVIEW): frozenset({SYSTEM}),
+    # A failed AI review goes back to the state it started from, so it can be started again (R10).
+    (DocState.UNDER_AI_REVIEW, DocState.DRAFTED): frozenset({SYSTEM}),
+    (DocState.UNDER_AI_REVIEW, DocState.REVISION_IN_PROGRESS): frozenset({SYSTEM}),
     (DocState.PENDING_LAWYER_REVIEW, DocState.LAWYER_COMMENTED): frozenset({LAWYER}),
     (DocState.PENDING_LAWYER_REVIEW, DocState.LAWYER_APPROVED): frozenset({LAWYER}),
     (DocState.LAWYER_COMMENTED, DocState.REVISION_IN_PROGRESS): frozenset({STARTUP, SYSTEM}),

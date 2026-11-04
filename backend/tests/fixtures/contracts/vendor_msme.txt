@@ -1,0 +1,22 @@
+SUPPLY AGREEMENT
+
+This Agreement is made on 1 October 2026 between Elm Example Components Private Limited (the "Supplier"), a micro enterprise registered under the Udyam scheme, and Fern Example Grid Systems Private Limited (the "Buyer").
+
+1. Supply. The Supplier shall supply the electrical components listed in each purchase order issued by the Buyer.
+
+2. Delivery and Acceptance. The Supplier shall deliver each order to the Buyer's warehouse at Pune. The Buyer shall inspect the goods within seven days of delivery and either accept them or give written reasons for rejecting them.
+
+3. Price. The price of each component is as set out in the relevant purchase order, exclusive of GST.
+
+4. Payment. The Buyer shall pay each undisputed invoice within ninety (90) days of acceptance of the goods.
+
+5. Late Payment. No interest shall be payable on any delayed payment.
+
+6. Warranty. The Supplier warrants that the goods will be free from defects for twelve months from acceptance.
+
+7. Termination. Either party may end this Agreement by giving the other thirty (30) days' written notice.
+
+8. Governing Law. This Agreement is governed by the laws of India, and the courts at Pune have exclusive jurisdiction.
+
+Signed for Elm Example Components Private Limited
+Signed for Fern Example Grid Systems Private Limited

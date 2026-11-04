@@ -1,0 +1,14 @@
+{
+  "rule_id": "ICA_S74_PENALTY_OR_LIQUIDATED_DAMAGES",
+  "statute": "Indian Contract Act, 1872",
+  "section": "74",
+  "applies_to": ["commercial_lease", "consultant_freelancer", "distributor_dealership", "employment_contract", "equipment_lease", "esop", "founders_agreement", "intercreditor_hypothecation", "jva", "leave_and_license", "loan_debt", "msa", "nda", "non_compete_non_solicit", "partnership_deed", "sha", "sla", "term_sheet_investment", "vendor_supplier"],
+  "condition": "contains_text('liquidated damages', 'by way of penalty', 'as a penalty', 'pay a penalty', 'penalty of', 'agreed damages')",
+  "severity": "medium",
+  "description": "The contract names a sum or a penalty payable on breach. Under s.74 a court awards only reasonable compensation, up to the amount named, so the sum may not be recoverable in full. It needs a reasonableness check.",
+  "remedy_suggested": "Check that the named sum is a genuine pre-estimate of the loss a breach would cause, and record how it was worked out. Remove any amount meant to punish rather than compensate.",
+  "basis": "s.74: \"When a contract has been broken, if a sum is named in the contract as the amount to be paid in case of such breach, or if the contract contains any other stipulation by way of penalty, the party complaining of the breach is entitled, whether or not actual damage or loss is proved to have been caused thereby, to receive from the party who has broken the contract reasonable compensation not exceeding the amount so named or, as the case may be, the penalty stipulated for.\"",
+  "version": 1,
+  "effective_from": "2024-01-01",
+  "verification_status": "unverified"
+}

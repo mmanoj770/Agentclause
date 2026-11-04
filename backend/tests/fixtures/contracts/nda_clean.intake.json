@@ -1,0 +1,9 @@
+{
+  "is_contract": true,
+  "parties": ["Cedar Example Software Private Limited", "Dahlia Example Robotics Private Limited"],
+  "execution_date": "2026-08-15",
+  "effective_date": "2026-08-15",
+  "document_type": "nda",
+  "jurisdiction": "India",
+  "clauses": ["confidential_info_definition", "exclusions", "obligations", "confidentiality", "term", "return_destruction", "residuals", "governing_law", "dispute_resolution"]
+}

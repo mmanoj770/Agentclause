@@ -1,0 +1,9 @@
+{
+  "is_contract": true,
+  "parties": ["Aster Example Technologies Private Limited", "Bramble Example Labs Private Limited"],
+  "execution_date": "2026-09-01",
+  "effective_date": "2026-09-01",
+  "document_type": "nda",
+  "jurisdiction": null,
+  "clauses": ["confidential_info_definition", "exclusions", "obligations", "confidentiality", "term", "residuals", "non_compete", "remedies"]
+}

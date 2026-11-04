@@ -43,11 +43,16 @@ def load_public_contracts(directory: Path | None = None) -> list[dict]:
             except Exception:
                 meta = {}
 
+        is_stub = bool(meta.get("is_stub", False) or txt_file.name.startswith("sample_stub")
+                       or "SYNTHETIC STUB" in meta.get("source", "")
+                       or "SYNTHETIC STUB" in meta.get("notes", ""))
+
         contracts.append({
             "name": txt_file.stem,
             "path": txt_file,
             "text": txt_file.read_text(encoding="utf-8"),
             "doc_type": meta.get("document_type", "vendor_supplier"),
+            "is_stub": is_stub,
             "meta": meta,
         })
     return contracts
@@ -60,8 +65,12 @@ def run_benchmark(directory: Path | None = None, *, strict: bool = True) -> dict
         msg = f"No public contracts found in {directory or DEFAULT_PUBLIC_DIR} (0 contracts benchmarked)."
         return {
             "total": 0,
+            "total_real": 0,
+            "total_stubs": 0,
             "strict": strict,
             "results": [],
+            "real_results": [],
+            "stub_results": [],
             "summary_table": msg,
         }
 
@@ -78,6 +87,7 @@ def run_benchmark(directory: Path | None = None, *, strict: bool = True) -> dict
         results.append({
             "name": c["name"],
             "doc_type": c["doc_type"],
+            "is_stub": c["is_stub"],
             "runtime_ms": runtime_ms,
             "findings_count": len(res.findings),
             "completeness_findings": len(completeness_findings),
@@ -86,27 +96,37 @@ def run_benchmark(directory: Path | None = None, *, strict: bool = True) -> dict
             "review_status": res.coverage.review_status,
         })
 
+    real_results = [r for r in results if not r["is_stub"]]
+    stub_results = [r for r in results if r["is_stub"]]
+    total_real = len(real_results)
+    total_stubs = len(stub_results)
+
     # Build summary table
     table_lines = [
-        f"Public Contract Benchmark Set (Total: {len(results)}, Strict: {strict})",
-        "=" * 96,
-        f"{'Contract Name':<30} | {'Type':<15} | {'Findings':<10} | {'Coverage (Eval/Tot)':<20} | {'Status':<15} | {'Runtime'}",
-        "-" * 96,
+        f"Public Contract Benchmark Set (Real: {total_real}, Stubs: {total_stubs}, Strict: {strict})",
+        "=" * 104,
+        f"{'Contract Name':<38} | {'Type':<15} | {'Findings':<10} | {'Coverage (Eval/Tot)':<20} | {'Status':<15} | {'Runtime'}",
+        "-" * 104,
     ]
     for r in results:
         cov = r["coverage"]
         cov_str = f"{cov['rules_evaluated']}/{cov['rules_total']}"
         findings_str = f"{r['findings_count']} (C:{r['completeness_findings']}, S:{r['statutory_findings']})"
+        label = f"{r['name']} [SYNTHETIC STUB]" if r["is_stub"] else r["name"]
         table_lines.append(
-            f"{r['name']:<30} | {r['doc_type']:<15} | {findings_str:<10} | {cov_str:<20} | {r['review_status']:<15} | {r['runtime_ms']} ms"
+            f"{label:<38} | {r['doc_type']:<15} | {findings_str:<10} | {cov_str:<20} | {r['review_status']:<15} | {r['runtime_ms']} ms"
         )
-    table_lines.append("=" * 96)
+    table_lines.append("=" * 104)
     summary_table = "\n".join(table_lines)
 
     return {
         "total": len(results),
+        "total_real": total_real,
+        "total_stubs": total_stubs,
         "strict": strict,
         "results": results,
+        "real_results": real_results,
+        "stub_results": stub_results,
         "summary_table": summary_table,
     }
 

@@ -44,6 +44,9 @@ Each benchmark case consists of:
    }
    ```
 
+> [!WARNING]
+> **Synthetic Stubs**: `sample_stub.txt` and `sample_stub.meta.json` are marked `SYNTHETIC STUB - not a real contract, do not use for benchmarking claims`. They exist only as a structural format reference for CI tests and must be excluded from aggregate real-world contract statistics.
+
 ---
 
 ## 4. Running the Benchmark

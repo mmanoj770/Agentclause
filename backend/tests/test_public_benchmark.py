@@ -30,20 +30,24 @@ def test_public_benchmark_empty_directory_graceful(tmp_path):
 def test_public_benchmark_sample_contract_loads_and_runs():
     contracts = load_public_contracts(DEFAULT_PUBLIC_DIR)
     assert len(contracts) >= 1
-    sample = next(c for c in contracts if c["name"] == "sample_gem_procurement")
+    sample = next(c for c in contracts if c["name"] == "sample_stub")
     assert sample["doc_type"] == "vendor_supplier"
+    assert sample["is_stub"] is True
     assert "GOVERNING LAW" in sample["text"]
 
     # Run in strict mode
     res_strict = run_benchmark(DEFAULT_PUBLIC_DIR, strict=True)
     assert res_strict["total"] >= 1
-    sample_res = next(r for r in res_strict["results"] if r["name"] == "sample_gem_procurement")
+    assert res_strict["total_real"] == 0
+    assert res_strict["total_stubs"] >= 1
+    sample_res = next(r for r in res_strict["results"] if r["name"] == "sample_stub")
+    assert sample_res["is_stub"] is True
     assert sample_res["review_status"] in ("no_rules_verified", "partial_unverified_rules")
     assert sample_res["runtime_ms"] > 0
-    assert "sample_gem_procurement" in res_strict["summary_table"]
+    assert "sample_stub [SYNTHETIC STUB]" in res_strict["summary_table"]
 
     # Run in demo mode
     res_demo = run_benchmark(DEFAULT_PUBLIC_DIR, strict=False)
-    sample_demo_res = next(r for r in res_demo["results"] if r["name"] == "sample_gem_procurement")
+    sample_demo_res = next(r for r in res_demo["results"] if r["name"] == "sample_stub")
     assert sample_demo_res["review_status"] == "complete"
 

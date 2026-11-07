@@ -32,6 +32,14 @@ class CompletenessConfig(BaseModel):
     required: list[RequiredClause] = Field(min_length=1)
 
 
+class CompletenessResult(BaseModel):
+    findings: list[Finding]
+    rules_total: int
+    rules_evaluated: int
+    rules_skipped_unverified: list[str]
+    review_status: str
+
+
 def rule_id_for(contract_type: str, clause: str) -> str:
     """e.g. ('nda', 'governing-law') -> NDA_GOVERNING_LAW_MISSING. Rule files use the same IDs,
     so run_review can drop a completeness finding that a rule already reported."""
@@ -82,3 +90,24 @@ class CompletenessChecker:
                 citation_type=CitationType.INTERNAL_BASELINE,
             ))
         return findings
+
+    def check_with_coverage(self, text: str, *, strict: bool = False,
+                            found: frozenset[str] | set[str] = frozenset()) -> CompletenessResult:
+        """Evaluate with explicit coverage metrics when strict mode skips unverified configs."""
+        rules_total = len(self.config.required)
+        if strict and not self.verified:
+            return CompletenessResult(
+                findings=[],
+                rules_total=rules_total,
+                rules_evaluated=0,
+                rules_skipped_unverified=self.rule_ids,
+                review_status="no_rules_verified",
+            )
+        findings = self.check(text, found)
+        return CompletenessResult(
+            findings=findings,
+            rules_total=rules_total,
+            rules_evaluated=rules_total,
+            rules_skipped_unverified=[],
+            review_status="complete",
+        )

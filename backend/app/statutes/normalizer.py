@@ -82,6 +82,49 @@ def normalise_statute_citation(act: str, year: int | None, section: str) -> tupl
     return normalise_act_name(act, year), normalise_section_number(section)
 
 
+from dataclasses import dataclass
+
+@dataclass(frozen=True)
+class SectionMatchResult:
+    matches: bool
+    match_level: str | None  # "exact", "subsection", "parent", or None
+
+
+def section_matches(citation: str, stored: str) -> SectionMatchResult:
+    """Evaluate whether a statute citation matches a stored database section.
+
+    Matching Rules (R8 #4-6 / for citation_gate):
+    1. 'exact': citation matches stored section exactly (e.g. '27' == '27', or '27(1)' == '27(1)').
+    2. 'subsection': citation is a base section ('27') and stored section is a subsection of it ('27(1)', '27(a)', '27(1)(a)').
+    3. 'parent': citation specifies a subsection ('27(1)') and stored section is its parent base section ('27').
+       Used as a fallback when the database has only the parent section stored.
+    4. False positives are strictly rejected: '27' does not match '270', '27A', '271'; '27(1)' does not match '27(2)'.
+    """
+    cit = normalise_section_number(citation)
+    sto = normalise_section_number(stored)
+    if not cit or not sto:
+        return SectionMatchResult(matches=False, match_level=None)
+
+    # 1. Exact match
+    if cit == sto:
+        return SectionMatchResult(matches=True, match_level="exact")
+
+    # 2. Citation is base section without subsection (e.g. '27')
+    # Matches any stored subsection: '27(x)', '27(1)', '27(a)'
+    if "(" not in cit:
+        if sto.startswith(cit + "("):
+            return SectionMatchResult(matches=True, match_level="subsection")
+
+    # 3. Citation specifies a subsection (e.g. '27(1)')
+    # Matches its parent base section: '27'
+    else:
+        parent_cit = cit.split("(", 1)[0]
+        if sto == parent_cit:
+            return SectionMatchResult(matches=True, match_level="parent")
+
+    return SectionMatchResult(matches=False, match_level=None)
+
+
 def display_status(status: str) -> str:
     """Map DB verification_status enum to user/API display label.
 
@@ -94,3 +137,34 @@ def display_status(status: str) -> str:
     if st == "verified":
         return "verified"
     raise ValueError(f"Unknown verification_status: {status!r}")
+
+
+def normalize_statute_quote(text: str) -> str:
+    """Normalize statute text for comparison between rule files and seed statutes.
+
+    Strips rule prefix citations (e.g. 's.28: \"'), exceptions, punctuation, and collapses
+    whitespace/casing to compare the core statutory quote text.
+    """
+    if not text:
+        return ""
+    # Strip rule prefix like 's.28: "' or 's.15: "'
+    t = re.sub(r'^\s*s\.\s*\d+\s*:\s*["\']?', '', text)
+    # Strip statutory exceptions appended to rule basis (e.g. 'Exception 1: ...')
+    t = re.sub(r'["\']?\s*Exception\s*\d+.*$', '', t, flags=re.DOTALL)
+    # Strip quotes
+    t = re.sub(r'["\'`]', ' ', t)
+    # Strip subsection markers like (a), (b), (1)
+    t = re.sub(r'\([a-zA-Z0-9]+\)', ' ', t)
+    # Normalize punctuation and non-alphanumeric
+    t = re.sub(r'[^a-zA-Z0-9\s]', ' ', t)
+    tokens = t.casefold().split()
+    # Normalize minor memory drafting variant in s.28: "a contract" vs "any contract"
+    # in "...liability under or in respect of a/any contract..."
+    norm = []
+    for tok in tokens:
+        if tok == "any" and norm and norm[-1] == "of":
+            norm.append("a")
+        else:
+            norm.append(tok)
+    return " ".join(norm)
+

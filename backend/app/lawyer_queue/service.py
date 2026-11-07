@@ -34,8 +34,19 @@ end, d.queued_at asc, d.id asc
 
 
 def list_queue(conn, user: CurrentUser, limit: int = 50, sort_by: str = "queued_at") -> list[dict]:
+    from app.pipeline import triage as triage_mod
     order_clause = ORDER_TRIAGE_TIER if sort_by == "triage_tier" else ORDER_QUEUED_AT
-    return conn.execute(QUEUE_SQL.format(order_clause=order_clause), (user.id, limit)).fetchall()
+    rows = conn.execute(QUEUE_SQL.format(order_clause=order_clause), (user.id, limit)).fetchall()
+    cfg = triage_mod._default_config()
+    is_placeholder = (cfg.status == "PLACEHOLDER")
+    results = []
+    for r in rows:
+        item = dict(r)
+        item["provisional"] = is_placeholder
+        if is_placeholder:
+            item["provisional_reason"] = "Config status is PLACEHOLDER; triage weights provisional pending counsel verification"
+        results.append(item)
+    return results
 
 
 def claim(conn, user: CurrentUser, doc_id) -> dict:

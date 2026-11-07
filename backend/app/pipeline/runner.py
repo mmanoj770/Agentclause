@@ -79,14 +79,15 @@ def _call_normalise(fn: Callable, text: str, doc_type: str) -> NormalizedDocumen
 
 
 def our_side_from_org(conn, document_id, doc: NormalizedDocument) -> str | None:
-    """The party that is the document's own organisation, if its name matches one intake found exactly
-    (ignoring case and spacing). None when it doesn't: R7 then has no side to score from and is skipped."""
+    """The party that is the document's own organisation, matching the org name using normalized
+    form or conservative fuzzy fallback. None when it doesn't: R7 then has no side to score from and is skipped."""
+    from app.pipeline.asymmetry import match_party_to_org
+
     row = conn.execute("select o.name from documents d join organizations o on o.id = d.org_id where d.id = %s",
                        (document_id,)).fetchone()
     if not row or not row["name"]:
         return None
-    wanted = " ".join(row["name"].split()).casefold()
-    return next((p for p in doc.parties if " ".join(p.split()).casefold() == wanted), None)
+    return match_party_to_org(row["name"], doc.parties)
 
 
 @dataclass
@@ -195,7 +196,12 @@ def run_layers(conn, document_id, version_id, doc_type: str, deps: PipelineDeps)
     review = layer("R3_R4_R5_rules", lambda: asyncio.run(
         run_review(doc.full_text, doc_type, strict=True, effective_date=doc.effective_date,
                    found_clauses=doc.clause_types())))
-    stats["R3_R4_R5_rules"].update(findings=len(review.findings), skipped=review.skipped_rules.count)
+    stats["R3_R4_R5_rules"].update(
+        findings=len(review.findings),
+        skipped=review.skipped_rules.count,
+        coverage=review.coverage.model_dump(),
+        review_status=review.coverage.review_status,
+    )
 
     r6 = layer("R6_consistency", lambda: consistency.run_consistency(doc))
     r6_findings = _strict(r6.findings, consistency._default_config())
@@ -204,11 +210,17 @@ def run_layers(conn, document_id, version_id, doc_type: str, deps: PipelineDeps)
     side = layer("R7_side", lambda: deps.our_side(conn, document_id, doc))
     if side is None:
         r7_findings, score = [], 0.0
-        stats["R7_asymmetry"] = {"ms": 0.0, "skipped": "no_side"}
+        stats["R7_asymmetry"] = {"ms": 0.0, "skipped": "no_side", "side_unknown": True}
     else:
         r7 = layer("R7_asymmetry", lambda: asymmetry.run_risk_asymmetry(doc, side, llm=deps.asymmetry_llm))
         r7_findings, score = _strict(r7.findings, asymmetry._default_config()), r7.score
-        stats["R7_asymmetry"].update(findings=len(r7_findings), raw=len(r7.findings), score=score)
+        stats["R7_asymmetry"].update(
+            findings=len(r7_findings),
+            raw=len(r7.findings),
+            score=score,
+            side_unknown=r7.side_unknown,
+            provisional=r7.provisional,
+        )
 
     findings = list(review.findings) + r6_findings + r7_findings
     gated = layer("R8_citation_gate", lambda: screen_findings(findings, document_id, corpus=deps.corpus,
@@ -227,8 +239,17 @@ def save_results(conn, document_id, version_id, passed, tier: dict, stats: dict)
                      (version_id,))
         created = insert_agent_findings(conn, document_id, version_id, passed)
         save_triage(conn, document_id, tier)
+        coverage_data = stats.get("R3_R4_R5_rules", {}).get("coverage")
+        review_status = stats.get("R3_R4_R5_rules", {}).get("review_status", "complete")
         write_audit(conn, document_id=document_id, actor_id=None, actor_role="system", action="findings_created",
-                    details={"count": created, "version_id": str(version_id), "strict": True, "layers": stats})
+                    details={
+                        "count": created,
+                        "version_id": str(version_id),
+                        "strict": True,
+                        "layers": stats,
+                        "coverage": coverage_data,
+                        "review_status": review_status,
+                    })
         transition(conn, document_id, DocState.PENDING_LAWYER_REVIEW, SYSTEM_ACTOR, "AI review finished")
     return created
 
@@ -272,5 +293,12 @@ def run_pipeline(document_id, version_id, from_state: str, *, deps: PipelineDeps
     ms = round((time.monotonic() - started) * 1000, 1)
     log.info("pipeline: document_id=%s version_id=%s findings=%d tier=%s ms=%.1f layers=%s", document_id, version_id,
              created, tier["review_tier"], ms, {k: v.get("ms") for k, v in stats.items()})
-    return {"outcome": "pending_lawyer_review", "findings": created, "tier": tier["review_tier"], "ms": ms,
-            "layers": stats}
+    return {
+        "outcome": "pending_lawyer_review",
+        "findings": created,
+        "tier": tier["review_tier"],
+        "ms": ms,
+        "layers": stats,
+        "coverage": stats.get("R3_R4_R5_rules", {}).get("coverage"),
+        "review_status": stats.get("R3_R4_R5_rules", {}).get("review_status", "complete"),
+    }

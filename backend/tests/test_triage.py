@@ -141,3 +141,35 @@ def test_save_triage_refuses_a_tier_the_table_would_reject():
 def test_tiers_match_the_documents_triage_tier_check():
     # migration 04: check (triage_tier in ('standard', 'enhanced', 'senior_counsel'))
     assert TIERS == ("standard", "enhanced", "senior_counsel")
+
+
+# --- Task 7: Placeholder / Provisional Flag Tests ---------------------------------------------
+
+def test_triage_provisional_flag_when_placeholder():
+    placeholder_cfg = config(status="PLACEHOLDER")
+    res = triage([finding("high")], config=placeholder_cfg)
+    assert res["provisional"] is True
+    assert "PLACEHOLDER" in res["provisional_reason"]
+
+    verified_cfg = config(status="VERIFIED")
+    res_verified = triage([finding("high")], config=verified_cfg)
+    assert res_verified["provisional"] is False
+    assert res_verified.get("provisional_reason") is None
+
+
+def test_queue_service_includes_provisional_flags():
+    from app.lawyer_queue.service import list_queue
+    from unittest.mock import MagicMock
+
+    mock_conn = MagicMock()
+    mock_conn.execute.return_value.fetchall.return_value = [
+        {"id": "doc-1", "doc_type": "nda", "triage_tier": "enhanced", "org_name": "Acme Corp"}
+    ]
+    mock_user = MagicMock()
+    mock_user.id = "user-1"
+
+    items = list_queue(mock_conn, mock_user)
+    assert len(items) == 1
+    assert items[0]["provisional"] is True
+    assert "provisional_reason" in items[0]
+

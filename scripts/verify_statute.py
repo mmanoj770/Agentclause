@@ -8,7 +8,9 @@ Usage:
         --by "advocate@example.com" --ref "ADV-CONFIRM-2026-11-04" [--revert]
 """
 import argparse
+import getpass
 import logging
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -26,9 +28,17 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger("verify_statute")
 
 
-def verify_statute(act: str, section: str, verified_by: str, verification_ref: str, revert: bool = False):
+def verify_statute(act: str, section: str, advocate: str, verification_ref: str, revert: bool = False):
+    if not advocate or not advocate.strip():
+        log.error("Advocate identity (--advocate / --by) is required and cannot be empty.")
+        sys.exit(1)
+    if not verification_ref or not verification_ref.strip():
+        log.error("Verification reference (--verification-ref / --ref) is required and cannot be empty.")
+        sys.exit(1)
+
     norm_act = normalise_act_name(act)
     norm_sec = normalise_section_number(section)
+    operator = os.environ.get("USER") or getpass.getuser() or "operator"
 
     pool.open()
     try:
@@ -59,14 +69,16 @@ def verify_statute(act: str, section: str, verified_by: str, verification_ref: s
                         set status = 'verified', verified_by = %s, verified_at = %s, verification_ref = %s
                         where id = %s
                         """,
-                        (verified_by, now, verification_ref, statute_id)
+                        (advocate, now, verification_ref, statute_id)
                     )
                     action = "statute_verified"
                     details = {
                         "statute_id": str(statute_id),
                         "act": norm_act,
                         "section": norm_sec,
-                        "verified_by": verified_by,
+                        "operator": operator,
+                        "advocate": advocate,
+                        "verified_by": advocate,
                         "verification_ref": verification_ref,
                     }
                 else:
@@ -87,7 +99,8 @@ def verify_statute(act: str, section: str, verified_by: str, verification_ref: s
                         "statute_id": str(statute_id),
                         "act": norm_act,
                         "section": norm_sec,
-                        "reverted_by": verified_by,
+                        "operator": operator,
+                        "reverted_by": advocate,
                         "reason": verification_ref,
                     }
 
@@ -99,8 +112,8 @@ def verify_statute(act: str, section: str, verified_by: str, verification_ref: s
                     action=action,
                     details=details
                 )
-                log.info("SUCCESS: Updated %s s. %s to status '%s' (action: %s)",
-                         norm_act, norm_sec, new_status, action)
+                log.info("SUCCESS: Updated %s s. %s to status '%s' by advocate '%s' (operator: %s)",
+                         norm_act, norm_sec, new_status, advocate, operator)
     finally:
         pool.close()
 
@@ -109,9 +122,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Verify or unverify a statute row in public.statutes")
     parser.add_argument("--act", required=True, help="Act name or alias (e.g. 'ICA', 'Indian Contract Act, 1872')")
     parser.add_argument("--section", required=True, help="Section number (e.g. '27', '27(1)')")
-    parser.add_argument("--by", required=True, help="Advocate email or name")
-    parser.add_argument("--ref", required=True, help="Advocate confirmation reference or document ID")
+    parser.add_argument("--advocate", "--by", dest="advocate", required=True,
+                        help="Advocate name or ID (stored in verified_by)")
+    parser.add_argument("--verification-ref", "--ref", dest="verification_ref", required=True,
+                        help="Advocate confirmation reference URL or document ID")
     parser.add_argument("--revert", action="store_true", help="Revert from verified back to staging")
     args = parser.parse_args()
 
-    verify_statute(args.act, args.section, args.by, args.ref, revert=args.revert)
+    verify_statute(args.act, args.section, args.advocate, args.verification_ref, revert=args.revert)

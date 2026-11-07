@@ -39,6 +39,111 @@ log = logging.getLogger(__name__)
 CONFIG_PATH = Path(__file__).parent / "config" / "asymmetry.json"
 MUTUAL = "mutual"
 
+_HONORIFICS = re.compile(r"^(?:m/s\.?|messrs\.?|shri\.?|smt\.?|mr\.?|mrs\.?|ms\.?|dr\.?)\s+", re.IGNORECASE)
+_SUFFIX_MAP = {
+    "pvt": "private",
+    "ltd": "limited",
+    "co": "company",
+    "corp": "corporation",
+    "inc": "incorporated",
+    "llp": "llp",
+}
+_CORP_SUFFIXES = ("private limited", "limited", "llp", "corporation", "incorporated", "company")
+FUZZY_THRESHOLD = 0.88
+CORE_THRESHOLD = 0.85
+
+
+def normalize_org_name(name: str) -> str:
+    """Normalize organization and party names: casefold, strip honorifics/M/s, map &,
+    strip punctuation, map standard suffixes (Pvt/Ltd/LLP), collapse whitespace."""
+    if not name:
+        return ""
+    text = name.strip()
+    text = _HONORIFICS.sub("", text)
+    text = re.sub(r"&", " and ", text)
+    text = re.sub(r"['’]", "", text)
+    text = re.sub(r"[^\w\s]", " ", text)
+    tokens = text.casefold().split()
+    reconstructed: list[str] = []
+    i = 0
+    while i < len(tokens):
+        if (i + 2 < len(tokens)
+                and tokens[i] == "limited"
+                and tokens[i + 1] == "liability"
+                and tokens[i + 2] == "partnership"):
+            reconstructed.append("llp")
+            i += 3
+        else:
+            reconstructed.append(_SUFFIX_MAP.get(tokens[i], tokens[i]))
+            i += 1
+    return " ".join(reconstructed)
+
+
+def _core_org_name(normalized: str) -> str:
+    """Strip standard trailing corporate suffixes to get distinctive business name tokens."""
+    text = normalized
+    for suffix in _CORP_SUFFIXES:
+        if text.endswith(" " + suffix):
+            text = text[: -len(suffix) - 1].strip()
+            break
+    return text
+
+
+def match_party_to_org(org_name: str, parties: list[str]) -> str | None:
+    """Match the document's org name against contract parties.
+    Uses exact normalized comparison first, then conservative fuzzy fallback (high threshold).
+    Ambiguous matches return None ('unknown side') rather than guess."""
+    if not org_name or not parties:
+        return None
+
+    norm_org = normalize_org_name(org_name)
+    if not norm_org:
+        return None
+
+    norm_parties = [(p, normalize_org_name(p)) for p in parties]
+
+    # 1. Exact normalized matches
+    exact = [p for p, np in norm_parties if np == norm_org]
+    if len(exact) == 1:
+        return exact[0]
+    if len(exact) > 1:
+        log.warning("org matching ambiguous: exact match for %r matched multiple parties: %r", org_name, exact)
+        return None
+
+    # 2. Conservative fuzzy fallback
+    from difflib import SequenceMatcher
+    core_org = _core_org_name(norm_org)
+    scored: list[tuple[str, float, float]] = []
+    for p, np in norm_parties:
+        if not np:
+            continue
+        sim_full = SequenceMatcher(None, norm_org, np).ratio()
+        core_p = _core_org_name(np)
+        sim_core = SequenceMatcher(None, core_org, core_p).ratio() if core_org and core_p else sim_full
+        if sim_full >= FUZZY_THRESHOLD and sim_core >= CORE_THRESHOLD:
+            scored.append((p, sim_full, sim_core))
+
+    if not scored:
+        return None
+
+    scored.sort(key=lambda x: (x[1], x[2]), reverse=True)
+    if len(scored) == 1:
+        best_p, sim_full, _ = scored[0]
+        log.warning("org matching used fuzzy fallback: org=%r matched party=%r (similarity=%.2f)",
+                    org_name, best_p, sim_full)
+        return best_p
+
+    top, runner_up = scored[0], scored[1]
+    if top[1] - runner_up[1] >= 0.08:
+        log.warning("org matching used fuzzy fallback: org=%r matched party=%r (similarity=%.2f)",
+                    org_name, top[0], top[1])
+        return top[0]
+
+    log.warning("org matching ambiguous: multiple fuzzy candidates for %r: %r",
+                org_name, [(s[0], round(s[1], 2)) for s in scored])
+    return None
+
+
 
 class Kind(str, Enum):
     OBLIGATION = "obligation"
@@ -321,6 +426,9 @@ class AsymmetryResult:
     findings: list[Finding]
     provisions: list[Provision]
     baseline_is_stub: bool
+    side_unknown: bool = False
+    provisional: bool = False
+    provisional_reason: str | None = None
 
 
 def _signed(p: Provision, our_side: str, weight: float) -> float:
@@ -330,18 +438,33 @@ def _signed(p: Provision, our_side: str, weight: float) -> float:
     return weight if (p.kind in BURDENS) == on_us else -weight
 
 
-def run_risk_asymmetry(doc: NormalizedDocument, our_side: str, *, config: AsymmetryConfig | None = None,
+def run_risk_asymmetry(doc: NormalizedDocument, our_side: str | None, *, config: AsymmetryConfig | None = None,
                        baselines: BaselineProvider | None = None,
                        llm: Callable[..., dict] | None = _gemini_llm) -> AsymmetryResult:
     """Score the contract from our_side (one of doc.parties) and emit findings for one-sided clauses.
 
+    If our_side is None, returns side_unknown=True and 0 findings safely.
     llm=None turns the Gemini fallback off. A failed fallback call is logged and the sentences stay unplaced.
     """
+    config = config or _default_config()
+    baselines = baselines or baseline_provider(config)
+
+    if our_side is None:
+        log.warning("risk asymmetry: side is unknown/None; emitting zero asymmetry findings with side_unknown=True")
+        return AsymmetryResult(
+            score=0.0,
+            clauses=[],
+            findings=[],
+            provisions=[],
+            baseline_is_stub=baselines.is_stub,
+            side_unknown=True,
+            provisional=config.is_placeholder,
+            provisional_reason="Config status is PLACEHOLDER; weights provisional pending counsel verification" if config.is_placeholder else None,
+        )
+
     if our_side not in doc.parties:
         raise ValueError("our_side must be one of the parties intake found")
     started = time.monotonic()
-    config = config or _default_config()
-    baselines = baselines or baseline_provider(config)
     weights = config.weights
     contract_type = doc.document_type.value
 
@@ -400,5 +523,13 @@ def run_risk_asymmetry(doc: NormalizedDocument, our_side: str, *, config: Asymme
              rule_count, llm_count, rejected, score, len(findings), baselines.is_stub,
              (time.monotonic() - started) * 1000)
     by_number = lambda c: tuple(int(n) for n in c.clause_number.split("."))  # noqa: E731  "7" before "10"
-    return AsymmetryResult(score=score, clauses=sorted(per_clause.values(), key=by_number),
-                           findings=findings, provisions=provisions, baseline_is_stub=baselines.is_stub)
+    return AsymmetryResult(
+        score=score,
+        clauses=sorted(per_clause.values(), key=by_number),
+        findings=findings,
+        provisions=provisions,
+        baseline_is_stub=baselines.is_stub,
+        side_unknown=False,
+        provisional=config.is_placeholder,
+        provisional_reason="Config status is PLACEHOLDER; weights provisional pending counsel verification" if config.is_placeholder else None,
+    )

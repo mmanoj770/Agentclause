@@ -261,3 +261,105 @@ def test_termination_findings_are_blocked_until_the_corpus_has_that_baseline():
     [f] = run(ONE_SIDED_TERMINATION).findings
     decision = check_finding(f, StubFixtureCorpus(), DocumentContext("vendor_supplier", frozenset({"1", "2", "3"})))
     assert not decision.allowed and decision.reason.value == "not_in_baseline"
+
+
+# --- Task 2: Org-name normalization and matching ----------------------------------------------
+
+@pytest.mark.parametrize("raw, expected", [
+    ("Acme Pvt. Ltd.", "acme private limited"),
+    ("Acme Private Limited", "acme private limited"),
+    ("Acme Pvt Ltd", "acme private limited"),
+    ("Acme Ltd.", "acme limited"),
+    ("M/s. Acme Tech Pvt. Ltd.", "acme tech private limited"),
+    ("M/s Acme Tech", "acme tech"),
+    ("Messrs Apex Partners", "apex partners"),
+    ("Shri Ram Enterprises", "ram enterprises"),
+    ("Dr. Reddy's Lab Ltd", "reddys lab limited"),
+    ("Johnson & Johnson Pvt Ltd", "johnson and johnson private limited"),
+    ("Alpha Beta LLP", "alpha beta llp"),
+    ("Alpha Beta Limited Liability Partnership", "alpha beta llp"),
+    ("  ACME   CORP  ", "acme corporation"),
+])
+def test_normalize_org_name(raw, expected):
+    from app.pipeline.asymmetry import normalize_org_name
+    assert normalize_org_name(raw) == expected
+
+
+@pytest.mark.parametrize("org_name, parties, expected_match", [
+    # 1. Exact normalized matches with suffix / punctuation / honorific variations
+    ("M/s. Acme Technologies Pvt. Ltd.",
+     ["Acme Technologies Private Limited", "Beta Services Ltd"],
+     "Acme Technologies Private Limited"),
+    ("Alpha & Beta LLP",
+     ["Gamma Corp", "Alpha and Beta LLP"],
+     "Alpha and Beta LLP"),
+    ("Tata Consultancy Services Ltd.",
+     ["Tata Consultancy Services Limited", "Wipro Limited"],
+     "Tata Consultancy Services Limited"),
+    ("Reddy's Laboratories Private Limited",
+     ["Dr. Reddy's Laboratories Pvt. Ltd.", "Cipla Limited"],
+     "Dr. Reddy's Laboratories Pvt. Ltd."),
+
+    # 2. Conservative fuzzy fallback (minor typo / OCR glitch)
+    ("Infosys Technologies Limited",
+     ["Infosys Technologes Limited", "Tata Motors Limited"],
+     "Infosys Technologes Limited"),
+
+    # 3. False-positive cases: similar names that are different companies -> None
+    ("Acme Technologies Private Limited",
+     ["Acme Logistics Private Limited", "Beta Corp"],
+     None),
+    ("Acme India Private Limited",
+     ["Beta India Private Limited"],
+     None),
+    ("Reliance Retail Limited",
+     ["Reliance Power Limited", "Tata Steel Limited"],
+     None),
+    ("Tata Motors Limited",
+     ["Tata Steel Limited", "Tata Consultancy Services Limited"],
+     None),
+
+    # 4. Ambiguous matches: multiple close candidates -> None
+    ("Star Enterprises",
+     ["Star Enterprise 1", "Star Enterprise 2"],
+     None),
+    ("Apex Global",
+     ["Apex Global Systems", "Apex Global Networks"],
+     None),
+
+    # 5. Empty / missing inputs -> None
+    ("", ["Acme Ltd"], None),
+    ("Acme Ltd", [], None),
+    ("Nonexistent Company", ["Acme Ltd", "Beta Ltd"], None),
+])
+def test_match_party_to_org(org_name, parties, expected_match, caplog):
+    from app.pipeline.asymmetry import match_party_to_org
+    result = match_party_to_org(org_name, parties)
+    assert result == expected_match
+    if org_name == "Infosys Technologies Limited":
+        assert "org matching used fuzzy fallback" in caplog.text
+    if org_name == "Star Enterprises":
+        assert "org matching ambiguous" in caplog.text
+
+
+# --- Task 7: Safe failure surfaces (side unknown & provisional flag) --------------------------
+
+def test_side_none_returns_side_unknown_and_zero_findings():
+    d = doc(ONE_SIDED_TERMINATION)
+    res = run_risk_asymmetry(d, our_side=None, llm=None)
+    assert res.side_unknown is True
+    assert res.score == 0.0
+    assert len(res.findings) == 0
+    assert len(res.clauses) == 0
+    assert res.provisional is True
+    assert "PLACEHOLDER" in res.provisional_reason
+
+
+def test_asymmetry_provisional_flag_when_placeholder():
+    d = doc(ONE_SIDED_TERMINATION)
+    res = run_risk_asymmetry(d, our_side=SUPPLIER, llm=None)
+    assert res.side_unknown is False
+    assert res.provisional is True
+    assert res.provisional_reason is not None
+
+

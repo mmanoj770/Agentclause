@@ -90,6 +90,12 @@ def test_demo_mode_gives_exactly_the_expected_findings(name):
 def test_strict_mode_gives_exactly_the_expected_findings(name):
     result = review(name, strict=True)
     assert triples(result.findings) == expected_triples(load(name)[2]["strict"])
+    # In strict mode, production returns 0 findings and explicitly reports no_rules_verified
+    assert len(result.findings) == 0
+    assert result.coverage.review_status == "no_rules_verified"
+    assert result.review_status == "no_rules_verified"
+    assert result.coverage.rules_evaluated == 0
+    assert result.coverage.rules_total > 0
     # Nothing found because nothing ran, and the response says so.
     assert result.skipped_rules.count > 0
     assert any(s.reason is SkipReason.UNVERIFIED_IN_STRICT_MODE for s in result.skipped_rules.rules)

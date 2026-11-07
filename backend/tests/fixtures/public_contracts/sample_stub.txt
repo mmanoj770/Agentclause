@@ -1,0 +1,22 @@
+MODEL GENERAL CONTRACT FOR PROCUREMENT OF GOODS AND SERVICES
+(Sourced from GeM Public Procurement Framework - Anonymized Reference)
+
+This Agreement is entered into on 1st November 2026 between:
+[Procuring Authority / Buyer], having its office at New Delhi, India (hereinafter "Buyer"), and
+[Supplier Company Private Limited], a company incorporated under the Companies Act with office at Bengaluru, Karnataka (hereinafter "Supplier").
+
+1. SCOPE OF SUPPLY
+The Supplier shall supply the goods and perform the related services specified in the Schedule of Requirements.
+
+2. PAYMENT TERMS
+The Buyer shall release payment within thirty (30) days from the date of final acceptance of goods. Any statutory deductions shall be made as applicable.
+
+3. GOVERNING LAW AND JURISDICTION
+This Agreement shall be governed by and construed in accordance with the laws of India. The courts of New Delhi, India shall have exclusive jurisdiction over any disputes.
+
+4. CONFIDENTIALITY
+Each party agrees to maintain confidentiality of proprietary technical information disclosed under this Agreement for a period of two (2) years.
+
+5. TERMINATION
+Either party may terminate this Agreement by giving sixty (60) days prior written notice to the other party.
+

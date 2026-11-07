@@ -94,7 +94,16 @@ def triage(findings: list[Finding], *, asymmetry_score: float = 0.0, config: Tri
     if critical and TIERS.index(tier) < TIERS.index(CRITICAL_MINIMUM_TIER):
         tier = CRITICAL_MINIMUM_TIER
         reasons.append(f"critical finding(s) {', '.join(critical)}: at least {CRITICAL_MINIMUM_TIER}")
-    return {"review_tier": tier, "score": score, "reasons": reasons}
+    is_placeholder = (config.status == "PLACEHOLDER")
+    out = {
+        "review_tier": tier,
+        "score": score,
+        "reasons": reasons,
+        "provisional": is_placeholder,
+    }
+    if is_placeholder:
+        out["provisional_reason"] = "Config status is PLACEHOLDER; triage weights provisional pending counsel verification"
+    return out
 
 
 def save_triage(conn, document_id, result: dict, *, config: TriageConfig | None = None) -> None:

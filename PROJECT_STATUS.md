@@ -1,119 +1,94 @@
-# AgentClause: project status (backend and Review Agent)
+# AgentClause: Project Status (Backend & Review Agent)
 
-Status as of 4 November 2026. Checked against `origin/main` (`41fbc94`), branch `blockers-prep` (`ae9116b`), the pushed remote branches, and read-only preflight queries on the live Supabase project (`pmrkwctwjqhrhkwtjrbz`, ap-south-1).
-
-## Summary
-
-- **Review Agent layers (R1–R11) and R10 pipeline are merged into `main` (`e326e29`, `a465184`, `41fbc94`).**
-- **All 5 engineering blockers are solved on branch `blockers-prep` (`ae9116b`), pushed and awaiting PR merge:**
-  1. Strict mode coverage metrics (`review_status`: `no_rules_verified` / `partial_unverified_rules` / `complete`) propagated to API and audit logs.
-  2. Org-name normalization and conservative fuzzy disambiguation for R7 asymmetry.
-  3. Pre-call DPDP PII redaction for Gemini intake (R2) and `docs/dpdp_intake_note.md`.
-  4. Advocate review pack generator (`docs/advocate_review_pack.md` & `.csv`) and unrun application script (`scripts/apply_advocate_review.py`).
-  5. Public contract benchmark set (`backend/tests/fixtures/public_contracts/`) and runner (`scripts/benchmark_public_contracts.py`).
-- **Database: 21 migrations applied and verified on live.** Migration 21 (`public.statutes`) preflight passed 4/4 on Supabase live.
-- **Backend test suite is 100% green: 957 passed, 37 skipped, 0 failed** (access test skips only).
-- **Zero premature verifications:** All legal rules and configs remain strictly `unverified` pending advocate sign-off.
-
-| Area | State |
-|---|---|
-| Backend foundation (auth, documents, storage, findings, queue, audit) | Done, on `main` |
-| Database | Live and healthy; all 21 migrations applied (`statutes` table live) |
-| Review Agent pipeline (R1–R11) | Merged to `main` (`pipeline-r10` + Gemini intake R2) |
-| Blocker resolutions (`blockers-prep`) | 5 tasks committed, tested, and pushed (`ae9116b`); PR ready |
-| Tests on `blockers-prep` | **957 passed, 37 skipped, 0 failed** |
-| Live end-to-end run (`dry_run.py`) | Ready for deployment window (19:00–20:00) |
-| Advocate-verified legal content | Review pack and apply script prepared; awaiting human review |
+**Status as of**: 7 November 2026  
+**Repository Branch**: `blockers-prep` (Commit `885c114`, pushed to `origin/blockers-prep`)  
+**Base Commit**: `origin/main` (`41fbc94`)  
+**Backend Test Suite**: **1001 passed, 38 skipped, 0 failed** in 7.80s (31 access test skips needing live tokens + 7 known skipped tests)  
+**Live Database**: Supabase (`pmrkwctwjqhrhkwtjrbz`, `ap-south-1` Mumbai) · 21 migrations live and verified
 
 ---
 
-## 1. What AgentClause is
+## Executive Summary
 
-AgentClause is an AI-assisted contract review and drafting platform for Indian startups. AI agents draft, review, and explain contracts, and **a licensed Indian advocate verifies and signs off before anything is delivered**. It is designed to fail closed: an unverified rule produces no findings in strict mode, an unindexed statute or missing baseline is blocked by the citation gate, and no customer document transitions to `delivered` without human lawyer adjudication.
+1. **Review Agent (R1–R11) Architecture Complete in Code**:
+   - The entire Review Agent pipeline is merged, tested, and runnable end-to-end.
+   - **Demo Mode (`strict=False`)**: Fully functional. Ingests contracts, detects missing mandatory clauses, verifies Indian statutory compliance (ICA, MSMED Act, CPC), scores one-sided risk asymmetry, gates citations, triages document risk tiers, and transitions states to `pending_lawyer_review`. Detects 6/6 planted defects in synthetic test fixtures (`nda_bad`, `nda_clean`, `vendor_msme`).
+   - **Strict Mode (`strict=True`, Production Default)**: Fully active and fails safe. Evaluates only verified rules. Because seed statutory quotes and clause configurations await advocate sign-off, the engine cleanly skips unverified rules and returns an explicit `review_status="no_rules_verified"` with `rules_evaluated=0` and full `coverage` metadata. It **never** gives unverified contracts a false "clean bill of health".
 
-**Three Agents:**
+2. **All Engineering Blocker Tasks Completed & Pushed on `blockers-prep`**:
+   - **Task 1 (Sample Provenance)**: Renamed `sample_gem_procurement` to `sample_stub` and isolated synthetic stubs from aggregate metrics in [`scripts/benchmark_public_contracts.py`](file:///Users/manojmj/Agentclause/scripts/benchmark_public_contracts.py).
+   - **Task 2 (Single Source of Truth for Statute Quotes)**: Implemented `normalize_statute_quote()`, dual-store parity assertions between `rules/` and `seed_statutes.json`, codified known asymmetries (CPC s. 20), and added store tracking columns in [`docs/advocate_review_pack.csv`](file:///Users/manojmj/Agentclause/docs/advocate_review_pack.csv).
+   - **Task 3 (Advocate Review Applier Safety Guards)**: Added atomic dual-store updates, in-memory rollback on failure, `--dry-run` and `--apply` flags, mandatory advocate name/date validation, and quote-modification refusal without an India Code URL in [`scripts/apply_advocate_review.py`](file:///Users/manojmj/Agentclause/scripts/apply_advocate_review.py).
+   - **Task 4 (Statute Edit Guard Migration 22)**: Created [`supabase/migrations/20261105100000_22_statutes_verified_guard.sql`](file:///Users/manojmj/Agentclause/supabase/migrations/20261105100000_22_statutes_verified_guard.sql) (file only) with a `BEFORE UPDATE` trigger demoting modified verified quotes to `staging`, plus [`scripts/preflight_22.sql`](file:///Users/manojmj/Agentclause/scripts/preflight_22.sql).
+   - **Task 5 (Statute Verification Tooling & Section Matching)**: Hardened [`scripts/verify_statute.py`](file:///Users/manojmj/Agentclause/scripts/verify_statute.py) with mandatory advocate credentials and audit logging; hardened [`scripts/load_statutes.py`](file:///Users/manojmj/Agentclause/scripts/load_statutes.py) with per-row SHA-256 drift detection; implemented `section_matches()` in [`backend/app/statutes/normalizer.py`](file:///Users/manojmj/Agentclause/backend/app/statutes/normalizer.py) and exported from [`app.statutes`](file:///Users/manojmj/Agentclause/backend/app/statutes/__init__.py) with specification in [`docs/statutes_matching_rule.md`](file:///Users/manojmj/Agentclause/docs/statutes_matching_rule.md).
+   - **Task 6 (Intake PII Redaction Hardening)**: Hardened DPDP redaction regexes in [`backend/app/intake/service.py`](file:///Users/manojmj/Agentclause/backend/app/intake/service.py) protecting Indian currencies (`12,50,000`, `Rs. 5,00,000`, `INR 1,25,00,000`), clause numbers, dates, and invoice IDs; added automatic retry on garbled/altered placeholders (`[PAN_1]` -> `[PAN_2]`); updated [`docs/dpdp_intake_note.md`](file:///Users/manojmj/Agentclause/docs/dpdp_intake_note.md) with explicit disclosure of unredacted entities.
+   - **Task 7 (Safe Failure Surfaces)**: Handled R7 `side=None` returning `side_unknown=True` and 0.0 score; added `provisional=True` flags in R7 asymmetry, R9 triage, and `/queue` when configs are `PLACEHOLDER`; propagated `coverage` and `review_status` to API schemas; verified strict mode returns `review_status="no_rules_verified"` on synthetic fixtures.
+   - **Task 8 (Expiration Guard Test)**: Added automated CI test in [`backend/tests/test_finding_views.py`](file:///Users/manojmj/Agentclause/backend/tests/test_finding_views.py) failing CI starting November 8, 2026 if `ID_ALIAS_UNTIL` (2026-11-15) is not removed or extended.
+   - **Task 9 (Outreach Packs & Master Tracking Table)**: Prepared dedicated outreach briefs in [`docs/outreach/`](file:///Users/manojmj/Agentclause/docs/outreach/) (`advocate.md`, `arjun.md`, `tejaswi.md`, `poornaa.md`, `compliance.md`) and centralized human action items in [`docs/HUMAN_ACTIONS.md`](file:///Users/manojmj/Agentclause/docs/HUMAN_ACTIONS.md).
 
-| Agent | Scope | State |
+3. **Zero Premature Verifications**: All legal rules, quotes, and configs remain strictly `unverified` pending advocate sign-off.
+
+---
+
+## 1. At a Glance Matrix
+
+| Area | Current State | Target / Blocker |
 |---|---|---|
-| **Review Agent (R1–R11)** | Review contract, detect missing clauses, check Indian statutory compliance, score risk asymmetry, gate citations, triage risk tier | Merged on `main`; blockers resolved on `blockers-prep` |
-| **Drafting Agent (D1–D8)** | Assemble drafts from verified clause library | Code on `main`; `/draft` returns fixtures; awaiting Poornaa's clause manifest (R8 #7) |
-| **Conversational Agent (C1–C9)** | Answer post-review questions about settled contracts | C1–C8 on `main`; C9 chat endpoint in progress with Tejaswi (`origin/tejaswi`) |
-
-**Document State Machine:**
-```
-drafted -> under_ai_review -> pending_lawyer_review -> lawyer_commented -> revision_in_progress -> under_ai_review ...
-                                                    -> lawyer_approved  -> delivered
-```
+| **Backend Core** | Done, on `main` | Auth, documents, S3 storage, findings, queue, audit operational. |
+| **Database** | Live & healthy | 21 migrations live. Migration 22 prepared (file only). |
+| **Review Agent (R1–R11)** | Complete in code | Demo mode 100% operational; Strict mode fails safe pending sign-offs. |
+| **Blockers Branch** | `blockers-prep` (`885c114`) | 17 commits ahead of `main`; PR ready for review and merge. |
+| **Test Suite** | **1001 passed, 38 skipped, 0 failed** | Zero failures permitted; full suite green in 7.80s. |
+| **Advocate Review Pack** | Prepared & guarded | `advocate_review_pack.csv` & `.md` ready; apply script guarded. |
+| **Human Actions Matrix** | Fully mapped | 11 tracked items across Advocate, Tejaswi, Arjun, Poornaa, Compliance, Counsel. |
 
 ---
 
-## 2. Backend & Database Status
+## 2. Review Agent (R1–R11 Layer Breakdown)
 
-### Applied Migrations (All 21 Live)
-- Migrations 01 through 20 are clean on live.
-- **Migration 21 (`20261104100000_21_statutes.sql`)**:
-  - Creates `public.statutes` table: `id`, `act`, `section`, `heading`, `statute_text`, `source_url`, `effective_from`, `effective_to`, `status` (`staging` / `verified`), `created_at`, `updated_at`.
-  - Indexes: unique `(act, section, effective_from)`, `act`, `status`.
-  - Preflight verification (`scripts/preflight_21.sql`): **4 PASS, 0 FAIL** on live Supabase instance.
-  - Normalized statute loader (`scripts/load_statutes.py`) and verification tool (`scripts/verify_statute.py`) implemented.
-
-### Server Lifecycle & Crash Recovery
-- Added `recover_stale_reviews()` in `app/main.py` lifespan: any documents orphaned in `under_ai_review` across server process restarts automatically revert to their prior state with an `ai_review_failed` audit row (`ServerProcessRestarted`).
-- Timeout on database pool acquisition during test lifespan startup prevents hangs when tests run without active Postgres.
-
----
-
-## 3. Review Agent (R1–R11 Layer Breakdown)
-
-| Layer | Component | Status | Details |
+| Layer | Component | Status | Implementation Details |
 |---|---|---|---|
-| **R1** | Finding Schema | **Done** | `app/schemas/finding.py` defines universal finding contract across all 10 layers. |
-| **R2** | Intake & Normalisation | **Done** | Gemini intake merged to `main`. On `blockers-prep`: added client-side DPDP PII redaction (PAN, Aadhaar, phone, email, bank/IFSC, GST) before API calls, with local mapping and character-for-character verbatim substring verification against original contract text. |
-| **R3** | Completeness Checker | **Done (Code)** | Shipped configs for **NDA**, **Vendor/Supplier**, **Founders' Agreement**, and **SHA**. Implemented `check_with_coverage()` reporting `rules_total`, `rules_evaluated`, `rules_skipped_unverified`, and `review_status`. |
-| **R4** | Rule Engine | **Done** | Evaluates date-versioned rules against normalized text, Indian date handling, clause references, and `evaluate_with_coverage()`. |
-| **R5** | Statutory Rules Content | **Done (Code)** | 7 seed rules staged (ICA ss. 27, 28, 74; MSMEDA ss. 15, 16; Internal NDA baselines). All staged as `unverified` (strict mode returns explicit `no_rules_verified` status until advocate sign-off). |
-| **R6** | Cross-Clause Consistency | **Done (Code)** | Conflicting facts/periods detection across clauses. Severities capped at `low` while config is placeholder. |
-| **R7** | Risk Asymmetry | **Done (Code)** | Upgraded on `blockers-prep`: robust `normalize_org_name()` (casefold, M/s, honorifics, &, punctuation, Pvt/Ltd/LLP canonicalization), and conservative fuzzy matching with logging. Ambiguous matches return `None` (unknown side). |
-| **R8** | Citation Gate | **In Progress** | Format alignment complete. `public.statutes` table created and seeded on DB (Migration 21). Arjun completing tasks 4–6 (DB corpus query, citation extraction, case-law index). Poornaa to provide clause manifest (R8 #7). |
-| **R9** | Risk Triage | **Done (Code)** | Computes document `triage_tier` (`standard`, `enhanced`, `specialist`) and saves to `documents.triage_tier`. Lawyer queue service supports `sort_by=triage_tier`. |
-| **R10** | Pipeline Orchestrator | **Done** | Async 202 background runner (`runner.py`), transaction rollbacks on failure, audit log details recording layer timings, count, and coverage metrics. |
-| **R11** | Evaluation & Benchmarks | **Done** | Synthetic fixtures in `backend/tests/fixtures/contracts/` (finds 6/6 in demo mode). New public benchmark set in `backend/tests/fixtures/public_contracts/` with runner `scripts/benchmark_public_contracts.py`. |
+| **R1** | Finding Schema | **Done** | [`app/schemas/finding.py`](file:///Users/manojmj/Agentclause/backend/app/schemas/finding.py) defines universal finding contract across all review layers. |
+| **R2** | Intake & Normalisation | **Done** | Client-side DPDP PII redaction (`INTAKE_REDACT_PII`) before LLM calls; hardened against currencies/dates/invoices; retry on altered tokens; verbatim substring verification against original contract text. |
+| **R3** | Completeness Checker | **Done (Code)** | Shipped configs for **NDA**, **Vendor/Supplier**, **Founders' Agreement**, and **SHA**. Implements `check_with_coverage()` reporting `rules_total`, `rules_evaluated`, `rules_skipped_unverified`, and explicit `review_status`. |
+| **R4** | Rule Engine | **Done** | Date-versioned rule evaluator against normalized text, Indian date handling, clause references, and `evaluate_with_coverage()`. |
+| **R5** | Statutory Rules Content | **Done (Code)** | 7 seed statutory rules staged (ICA ss. 27, 28, 74; MSMEDA ss. 15, 16; CPC s. 20). Staged as `unverified`; single source of truth test verifies parity between `rules/` and `seed_statutes.json`. |
+| **R6** | Cross-Clause Consistency | **Done (Code)** | Detects conflicting facts/periods across clauses. Severities capped at `low` while config is placeholder. |
+| **R7** | Risk Asymmetry | **Done (Code)** | Robust org-name normalization (`normalize_org_name`: casefold, M/s, honorifics, &, punctuation, Pvt/Ltd/LLP canonicalization), and conservative fuzzy matching with logging. Ambiguous/missing party matches return `side_unknown=True` and 0.0 score. |
+| **R8** | Citation Gate | **In Progress** | Write-time screening: `public.statutes` table live (Migration 21); trigger guard migration 22 ready; `section_matches()` exported from `app.statutes`. Awaiting Arjun's DB lookup wiring and Poornaa's clause manifest. |
+| **R9** | Risk Triage | **Done (Code)** | Computes document `triage_tier` (`tier_1_urgent`, `tier_2_standard`, `tier_3_routine`) based on severity points and R7 asymmetry score. Flags `provisional=True` when weights are placeholder. Lawyer queue supports sorting by tier. |
+| **R10** | Pipeline Runner | **Done** | Background orchestration (`runner.py`), transaction rollbacks on failure, `recover_stale_reviews()` in FastAPI lifespan, audit logs recording layer timings, counts, coverage, and review status. |
+| **R11** | Evaluation & Benchmarking | **Done** | Synthetic fixtures in `backend/tests/fixtures/contracts/` (finds 6/6 in demo mode; reports `no_rules_verified` in strict mode). Public benchmark runner (`scripts/benchmark_public_contracts.py`) isolates synthetic stubs (`sample_stub`). |
 
 ---
 
-## 4. What Remains by Owner
+## 3. Human Actions & Blocker Resolution Roadmap
 
-### A. Code & Merges
-1. **Merge `blockers-prep` into `main`** (Manoj / Tejaswi):
-   - PR URL: `https://github.com/mmanoj770/Agentclause/pull/new/blockers-prep`
-   - Incorporates all 5 blocker tasks (+44 passing tests, 957 total).
-2. **PR #10 (Arjun)**:
-   - Fallback log sanitization to log only codes and citation hashes, never contract text.
-3. **C9 Chat Endpoint (Tejaswi)**:
-   - Merge `origin/tejaswi` after deployment window to connect real `/chat` route.
+All technical preparations are complete. Production readiness requires completion of the following human-only actions tracked in [`docs/HUMAN_ACTIONS.md`](file:///Users/manojmj/Agentclause/docs/HUMAN_ACTIONS.md):
 
-### B. Human & Legal Sign-offs (Prepared & Turnkey)
-1. **Advocate Verification (R3 + R5)**:
-   - Advocate reviews `docs/advocate_review_pack.md` and verifies quotes against India Code URLs.
-   - Marks verified rows in `docs/advocate_review_pack.csv`.
-   - Run `python3 scripts/apply_advocate_review.py` (do not run until advocate signs off).
-2. **DPDP Compliance Review (R2)**:
-   - Compliance counsel reviews `docs/dpdp_intake_note.md` regarding Google Gemini DPA terms, user consent notices (DPDP ss. 5 & 6), and Section 16 data residency.
-3. **Market Baseline & Triage Calibration (R7 + R9)**:
-   - Replace placeholder weights in `app/pipeline/config/asymmetry.json` and `app/pipeline/config/triage.json` once pilot feedback is gathered.
+| Item # | Owner | Task & Deliverable | Blocking Layers | Prepared Tools / Artifacts |
+|:---:|:---|:---|:---:|:---|
+| **HA-01** | **Advocate** (Legal Counsel) | Verify 7 statutory seed quotes against India Code | **R4, R5, R8** | [`docs/advocate_review_pack.csv`](file:///Users/manojmj/Agentclause/docs/advocate_review_pack.csv)<br>[`scripts/apply_advocate_review.py`](file:///Users/manojmj/Agentclause/scripts/apply_advocate_review.py)<br>[`docs/outreach/advocate.md`](file:///Users/manojmj/Agentclause/docs/outreach/advocate.md) |
+| **HA-02** | **Advocate** (Legal Counsel) | Sign off on mandatory NDA clause list | **R3** | [`nda_required_clauses.json`](file:///Users/manojmj/Agentclause/backend/app/rules/config/nda_required_clauses.json)<br>[`docs/advocate_review_pack.md`](file:///Users/manojmj/Agentclause/docs/advocate_review_pack.md) |
+| **HA-03** | **Compliance / DPO** | Sign off on DPDP Section 16 data transit & customer consent | **R2, R10** | [`docs/dpdp_intake_note.md`](file:///Users/manojmj/Agentclause/docs/dpdp_intake_note.md)<br>[`docs/outreach/compliance.md`](file:///Users/manojmj/Agentclause/docs/outreach/compliance.md) |
+| **HA-04** | **Arjun** | Wire Citation Gate to `public.statutes` table | **R8** | [`docs/statutes_matching_rule.md`](file:///Users/manojmj/Agentclause/docs/statutes_matching_rule.md)<br>[`app.statutes.section_matches`](file:///Users/manojmj/Agentclause/backend/app/statutes/normalizer.py)<br>[`docs/outreach/arjun.md`](file:///Users/manojmj/Agentclause/docs/outreach/arjun.md) |
+| **HA-05** | **Arjun** | Finding citation token extraction & case-law index | **R8** | [`docs/outreach/arjun.md`](file:///Users/manojmj/Agentclause/docs/outreach/arjun.md) |
+| **HA-06** | **Poornaa** | Provide structured clause manifest schema (R8 #7) | **R6, R7, R8** | [`docs/outreach/poornaa.md`](file:///Users/manojmj/Agentclause/docs/outreach/poornaa.md) |
+| **HA-07** | **Legal Counsel** (Partner) | Calibrate risk triage weights (`triage.json`) | **R9** | [`backend/app/pipeline/config/triage.json`](file:///Users/manojmj/Agentclause/backend/app/pipeline/config/triage.json) |
+| **HA-08** | **Legal Counsel** (Partner) | Calibrate risk asymmetry provision weights (`asymmetry.json`) | **R7** | [`backend/app/pipeline/config/asymmetry.json`](file:///Users/manojmj/Agentclause/backend/app/pipeline/config/asymmetry.json) |
+| **HA-09** | **Tejaswi** | Deploy migrations 20, 21, and 22 during deploy window | **All DB** | [`20261105100000_22_statutes_verified_guard.sql`](file:///Users/manojmj/Agentclause/supabase/migrations/20261105100000_22_statutes_verified_guard.sql)<br>[`scripts/preflight_21.sql`](file:///Users/manojmj/Agentclause/scripts/preflight_21.sql)<br>[`scripts/preflight_22.sql`](file:///Users/manojmj/Agentclause/scripts/preflight_22.sql) |
+| **HA-10** | **Tejaswi** | Review and merge PR `blockers-prep` into `main` | **Main Branch** | [PR Link](https://github.com/mmanoj770/Agentclause/pull/new/blockers-prep)<br>[`docs/outreach/tejaswi.md`](file:///Users/manojmj/Agentclause/docs/outreach/tejaswi.md) |
+| **HA-11** | **Engineering** | Deprecate Finding `id` alias before November 15, 2026 | **API Schemas** | [`backend/tests/test_finding_views.py`](file:///Users/manojmj/Agentclause/backend/tests/test_finding_views.py) |
 
-### C. Plumbing & Agent Integrations
-1. **Clause Manifest (Poornaa - D1–D8, R8 #7)**:
-   - Drafting agent to emit clause manifest so citation gate allows R6 and R7 findings in strict mode without blocking.
-2. **Statutes DB Corpus Wiring (Arjun - R8 #4–#6)**:
-   - Connect citation gate to query the live `statutes` table instead of stub dictionaries.
-   - Implement citation text extraction and case-law index.
+---
 
-### D. Operations & Live Deployment
-1. **Deployment Window (19:00–20:00)**:
-   - Set live server environment variables (`S3_BUCKET`, `GEMINI_API_KEY`).
-   - Run `scripts/e2e_upload.py` and `scripts/dry_run.py` to verify real S3 and database transactions.
-2. **Key Rotation Schedule**:
-   - Database and JWT secrets rotated.
-   - IAM user and keys deleted on 2 Nov.
-   - Legacy Supabase keys scheduled for disable on Friday 6 Nov (19:00) and revoke on Mon 9 Nov.
+## 4. Verification and Pull Request
+
+- **PR Branch**: `blockers-prep`
+- **PR URL**: `https://github.com/mmanoj770/Agentclause/pull/new/blockers-prep`
+- **Commits Ahead of Main**: 17 commits
+- **Test Suite Verification**:
+  ```bash
+  cd backend && PYTHONPATH=. .venv/bin/pytest -q tests
+  # 1001 passed, 38 skipped, 0 failed in 7.80s
+  ```

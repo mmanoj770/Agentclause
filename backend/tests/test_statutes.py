@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from app.agents.citation_gate import StubFixtureCorpus
-from app.statutes.normalizer import (
+from app.statutes import (
     SectionMatchResult,
     display_status,
     normalise_act_name,

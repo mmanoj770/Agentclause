@@ -117,6 +117,10 @@ def test_usage_log_has_ids_and_sizes_but_never_the_contract_text(setup, caplog):
     assert "outcome=not_a_contract" in caplog.text
 
 
+def test_the_cap_comes_from_the_setting():
+    assert MAX_CONTRACT_CHARS == settings.intake_max_contract_chars
+
+
 def test_limiter_window_expires():
     now = [0.0]
     lim = SlidingWindowLimiter(limits=((60, 2),), clock=lambda: now[0])
@@ -129,7 +133,11 @@ def test_limiter_window_expires():
 def test_rate_limit_settings_defaults_and_minimum(monkeypatch):
     monkeypatch.delenv("INTAKE_RATE_LIMIT_PER_MINUTE", raising=False)
     monkeypatch.delenv("INTAKE_RATE_LIMIT_PER_HOUR", raising=False)
+    monkeypatch.delenv("INTAKE_MAX_CONTRACT_CHARS", raising=False)
     s = Settings(_env_file=None)
     assert (s.intake_rate_limit_per_minute, s.intake_rate_limit_per_hour) == (5, 30)
+    assert s.intake_max_contract_chars == 500_000  # unchanged from before the setting existed
     with pytest.raises(ValidationError):
         Settings(_env_file=None, intake_rate_limit_per_minute=0)
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, intake_max_contract_chars=0)

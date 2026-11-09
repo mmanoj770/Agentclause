@@ -11,8 +11,8 @@ from threading import Lock
 
 from app.config import settings
 
-# About 25k characters is roughly a long NDA. Far below the old 500,000.
-MAX_CONTRACT_CHARS = 25_000
+# Largest accepted contract text, in characters. A setting (INTAKE_MAX_CONTRACT_CHARS), read once at startup.
+MAX_CONTRACT_CHARS = settings.intake_max_contract_chars
 
 # (window in seconds, maximum requests in that window) per user. The numbers are settings
 # (INTAKE_RATE_LIMIT_PER_MINUTE, INTAKE_RATE_LIMIT_PER_HOUR); defaults 5 and 30.

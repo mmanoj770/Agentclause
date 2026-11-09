@@ -37,6 +37,10 @@ class Settings(BaseSettings):
     # (see the systemd unit). Recheck before anyone adds workers or a second server.
     intake_rate_limit_per_minute: int = Field(default=5, ge=1)
     intake_rate_limit_per_hour: int = Field(default=30, ge=1)
+    # Largest contract text POST /intake/normalize accepts, in characters. The default is what main allowed
+    # before this setting existed. Lower it only after measuring our longest real contracts: a long
+    # shareholders' or vendor agreement can run to 60+ pages (roughly 90,000 characters).
+    intake_max_contract_chars: int = Field(default=500_000, ge=1)
 
     # Which contract types users may pick. Nothing is "live" yet, so include in_build while developing.
     selectable_contract_statuses: list[str] = ["live"]

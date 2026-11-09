@@ -30,7 +30,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict  # noqa: E402
 from app.config import ROOT  # noqa: E402
 
 report, skip, detail = e2e.report, e2e.skip, e2e.api_detail
-CLIENT_KEYS = {"finding_id", "id", "severity", "clause_reference", "description", "remedy_suggested",
+# The deprecated `id` alias is ignored in both directions (never required, never forbidden): the live server
+# serves it until the deploy that removes it, so this passes before and after that deploy.
+CLIENT_KEYS = {"finding_id", "severity", "clause_reference", "description", "remedy_suggested",
                "citation", "citation_type", "status", "origin"}
 REVIEW_TIMEOUT_S = 180   # the R10 pipeline runs in the background; poll the document state until then
 HIDDEN_FROM_CLIENT = ("layer", "rule_applied", "advocate_notes", "adjudicated_by", "adjudicated_at")
@@ -148,8 +150,8 @@ def run(client, tokens: dict, ctx: dict) -> None:
     items = r.json() if r.status_code == 200 else []
     report("6", "lawyer lists the findings", r.status_code == 200 and len(items) == created,
            detail(r) if r.status_code != 200 else f"{len(items)} item(s)")
-    report("6", "all are origin=agent, with finding_id == id, a layer name and a citation_type",
-           all(i["origin"] == "agent" and i["id"] == i["finding_id"] and i["layer"] and i["citation_type"]
+    report("6", "all are origin=agent, with a finding_id, a layer name and a citation_type",
+           all(i["origin"] == "agent" and i["finding_id"] and i["layer"] and i["citation_type"]
                for i in items))
     open_serious = [i for i in items if i["severity"] in ("high", "critical")]
 
@@ -207,11 +209,11 @@ def run(client, tokens: dict, ctx: dict) -> None:
         want = {f["finding_id"] for f in confirmed} | ({added["finding_id"]} if added else set())
         report("11", "exactly the confirmed and lawyer-added findings (no overridden, no pending)",
                {v["finding_id"] for v in view} == want, f"{len(view)} shown, {len(want)} expected")
-        report("11", "origins are right and id == finding_id",
-               all(v["id"] == v["finding_id"] and v["origin"] == ("advocate" if added and v["finding_id"]
+        report("11", "origins are right",
+               all(v["origin"] == ("advocate" if added and v["finding_id"]
                    == added["finding_id"] else "agent") for v in view))
         report("11", "no layer, rule ID, lawyer notes or adjudication data reach the client",
-               all(set(v) == CLIENT_KEYS and not any(h in v for h in HIDDEN_FROM_CLIENT) for v in view)
+               all(set(v) - {"id"} == CLIENT_KEYS and not any(h in v for h in HIDDEN_FROM_CLIENT) for v in view)
                and "private lawyer note" not in r.text)
     r = client.get(f"/documents/{doc}/client-findings", headers=b)
     report("11", "startup B still cannot see it (404)", r.status_code == 404, detail(r))

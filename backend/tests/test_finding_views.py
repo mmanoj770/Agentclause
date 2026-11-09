@@ -1,6 +1,6 @@
-"""Lawyer findings views (agent / advocate read models, origin) and the finding_id / id alias."""
+"""Lawyer findings views (agent / advocate read models, origin) and the finding_id field."""
 import uuid
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import pytest
 from fastapi.testclient import TestClient
@@ -8,8 +8,7 @@ from fastapi.testclient import TestClient
 from app.auth.dependencies import CurrentUser, get_current_user
 from app.db import get_conn
 from app.findings import schemas
-from app.findings.schemas import (ID_ALIAS_UNTIL, AdvocateFindingOut, AgentFindingOut, ClientFindingOut,
-                                  lawyer_finding_out)
+from app.findings.schemas import AdvocateFindingOut, AgentFindingOut, ClientFindingOut, lawyer_finding_out
 from app.main import app
 
 ORG_A = str(uuid.uuid4())
@@ -38,58 +37,17 @@ def advocate_row(**extra):
     return base
 
 
-# --- the id alias ---------------------------------------------------------------------------------
+# --- finding_id -----------------------------------------------------------------------------------
 
-def test_every_finding_model_carries_id_as_an_alias_of_finding_id():
+def test_every_finding_model_identifies_a_finding_by_finding_id_only():
     a = lawyer_finding_out(agent_row())
     b = lawyer_finding_out(advocate_row())
     c = ClientFindingOut(finding_id=uuid.uuid4(), severity="low", description="x", status="confirmed",
                          origin="agent")
     for m in (a, b, c):
         dumped = m.model_dump(mode="json")
-        assert dumped["id"] == dumped["finding_id"] == str(m.finding_id)
-
-
-def test_the_id_alias_is_removed_after_the_integration_day():
-    assert date.today() <= ID_ALIAS_UNTIL, (
-        f"The deprecated `id` alias was due for removal after {ID_ALIAS_UNTIL}. Remove the `id` "
-        "property from _FindingId in app/findings/schemas.py and the alias assertions in the tests.")
-
-
-def test_id_alias_7_day_expiration_guard():
-    """Fails with an actionable message if today is within 7 days of ID_ALIAS_UNTIL or after it."""
-    today = date.today()
-    days_remaining = (ID_ALIAS_UNTIL - today).days
-
-    if days_remaining <= 0:
-        pytest.fail(
-            f"ID_ALIAS_UNTIL ({ID_ALIAS_UNTIL}) has expired ({abs(days_remaining)} day(s) ago). "
-            "Action required: Remove the deprecated `id` alias from app/findings/schemas.py "
-            "or deliberately extend ID_ALIAS_UNTIL if client migration is still pending."
-        )
-    elif days_remaining <= 7:
-        pytest.fail(
-            f"ID_ALIAS_UNTIL ({ID_ALIAS_UNTIL}) expires in {days_remaining} day(s) (within 7-day warning window). "
-            "Action required: Remove the deprecated `id` alias from app/findings/schemas.py "
-            "or deliberately extend ID_ALIAS_UNTIL with team alignment."
-        )
-
-
-@pytest.mark.parametrize("offset_days, should_fail", [
-    (11, False),  # 11 days remaining (today Nov 4) -> ok
-    (8, False),   # 8 days remaining -> ok
-    (7, True),    # 7 days remaining -> fail
-    (3, True),    # 3 days remaining -> fail
-    (0, True),    # expiration day -> fail
-    (-2, True),   # expired 2 days ago -> fail
-])
-def test_id_alias_expiration_guard_thresholds(offset_days, should_fail):
-    fake_today = ID_ALIAS_UNTIL - timedelta(days=offset_days)
-    days_remaining = (ID_ALIAS_UNTIL - fake_today).days
-
-    is_warning_or_expired = (days_remaining <= 7)
-    assert is_warning_or_expired == should_fail
-
+        assert dumped["finding_id"] == str(m.finding_id)
+        assert "id" not in dumped  # the deprecated alias is gone
 
 
 # --- read models ----------------------------------------------------------------------------------
@@ -192,7 +150,7 @@ def test_lawyer_list_is_one_merged_list_tagged_by_origin(env):
     assert r.status_code == 200
     body = r.json()
     assert [f["origin"] for f in body] == ["agent", "advocate"]
-    assert all(f["id"] == f["finding_id"] for f in body)
+    assert all(f["finding_id"] for f in body)
     assert "layer" in body[0] and "layer" not in body[1]
 
 
@@ -214,7 +172,7 @@ def test_adjudicate_returns_the_agent_view_with_both_ids(env):
     r = env.client.post(f"/findings/{fid}/adjudicate", json={"action": "confirm"})
     assert r.status_code == 200
     body = r.json()
-    assert body["origin"] == "agent" and body["finding_id"] == body["id"] == str(fid)
+    assert body["origin"] == "agent" and body["finding_id"] == str(fid)
     assert body["status"] == "confirmed"
 
 
@@ -234,5 +192,5 @@ def test_adding_a_finding_returns_the_advocate_view(env):
     assert r.status_code == 201
     body = r.json()
     assert body["origin"] == "advocate" and body["status"] == "added"
-    assert body["id"] == body["finding_id"]
+    assert body["finding_id"]
     assert "layer" not in body and "citation" not in body

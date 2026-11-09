@@ -1,8 +1,8 @@
-from datetime import date, datetime
+from datetime import datetime
 from typing import Annotated, Literal, Union
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.schemas.finding import Layer
 
@@ -33,19 +33,9 @@ class AdjudicateIn(BaseModel):
     notes: str | None = None
 
 
-# `finding_id` is the canonical id of a finding. `id` is kept as a deprecated alias so a client that
-# still reads `id` keeps working until the integration day. It is removed after this date
-# (tests/test_finding_views.py fails once the date has passed, so the alias cannot outlive it).
-ID_ALIAS_UNTIL = date(2026, 11, 15)
-
-
+# `finding_id` is the id of a finding in every response model.
 class _FindingId(BaseModel):
     finding_id: UUID
-
-    @computed_field(description="Deprecated alias of finding_id; removed after ID_ALIAS_UNTIL.")
-    @property
-    def id(self) -> UUID:
-        return self.finding_id
 
 
 class ClientFindingOut(_FindingId):

@@ -1,3 +1,4 @@
+import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -5,6 +6,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.db import pool
 from app.users.router import router as users_router
+
+# INFO lines from our own code (intake usage, startup mode) are dropped unless a handler exists:
+# uvicorn only configures its own loggers. Scoped to "app" so libraries keep their default level.
+_app_logger = logging.getLogger("app")
+if not _app_logger.handlers:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
+    _app_logger.addHandler(_handler)
+    _app_logger.setLevel(logging.INFO)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

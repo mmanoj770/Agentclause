@@ -1,4 +1,5 @@
 from pathlib import Path
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ROOT = Path(__file__).resolve().parents[2]  # repo root, where .env.local lives
@@ -15,6 +16,12 @@ class Settings(BaseSettings):
     @property
     def cors_origins(self) -> list[str]:
         return [o.strip() for o in self.cors_allowed_origins.split(",") if o.strip()]
+
+    # POST /intake/normalize limits per user. Each request can trigger up to 3 model calls, so lower these
+    # if model costs matter. Counted in memory per process: exact only while the server runs a single worker
+    # (see the systemd unit). Recheck before anyone adds workers or a second server.
+    intake_rate_limit_per_minute: int = Field(default=5, ge=1)
+    intake_rate_limit_per_hour: int = Field(default=30, ge=1)
 
     # Which contract types users may pick. Nothing is "live" yet, so include in_build while developing.
     selectable_contract_statuses: list[str] = ["live"]

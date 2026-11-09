@@ -13,4 +13,4 @@ numpy==2.5.4
 sentence-transformers==6.1.0
 google-genai==2.31.0
 anthropic==2.3.0
-tzdata
+tzdata==2026.6

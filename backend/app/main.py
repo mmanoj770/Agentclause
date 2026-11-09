@@ -18,6 +18,7 @@ if not _app_logger.handlers:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    settings.check_startup()
     pool.open()
     try:
         from app.pipeline.runner import recover_stale_reviews

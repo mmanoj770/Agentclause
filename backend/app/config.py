@@ -1,11 +1,26 @@
+import logging
 from pathlib import Path
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+logger = logging.getLogger(__name__)
+
 ROOT = Path(__file__).resolve().parents[2]  # repo root, where .env.local lives
+_LOCAL_MARKERS = ("localhost", "127.0.0.1", "[::1]")
+
+
+def _is_local(value: str) -> bool:
+    value = value.lower()
+    return any(marker in value for marker in _LOCAL_MARKERS)
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=ROOT / ".env.local", extra="ignore")
+
+    # Deployment mode: "development" (the default) or "production". Production turns on the startup
+    # check in check_startup(). Set APP_ENV=production on the server BEFORE deploying the code that
+    # checks it: the check does nothing until the variable exists, and the variable does nothing on old code.
+    app_env: str = "development"
 
     database_url: str = "postgresql://postgres:postgres@127.0.0.1:54322/postgres"
     supabase_url: str = "http://127.0.0.1:54321"
@@ -57,5 +72,29 @@ class Settings(BaseSettings):
         "image/png",
         "image/jpeg",
     ]
+
+    def check_startup(self) -> None:
+        """Log the mode; in production refuse to start if a setting still has its local-development value.
+
+        Messages name settings only, never their values (a database URL can contain a password).
+        s3_bucket and the model keys are deliberately not checked: empty means the feature answers a handled 503.
+        """
+        mode = self.app_env.strip().lower()
+        if mode not in ("development", "production"):
+            raise RuntimeError("APP_ENV must be 'development' or 'production'")
+        logger.info("startup mode=%s", mode)
+        if mode != "production":
+            return
+        problems = []
+        if _is_local(self.database_url):
+            problems.append("DATABASE_URL")
+        if _is_local(self.supabase_url):
+            problems.append("SUPABASE_URL")
+        if not self.cors_origins or any(_is_local(o) for o in self.cors_origins):
+            problems.append("CORS_ALLOWED_ORIGINS")
+        if problems:
+            raise RuntimeError("Refusing to start in production: these settings are missing or still "
+                               "local-development values: " + ", ".join(problems))
+
 
 settings = Settings()

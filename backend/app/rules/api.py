@@ -1,4 +1,5 @@
 """run_review(): the single entry point for a rules-based review (R3 completeness + R4 rule engine)."""
+import asyncio
 import logging
 from collections import Counter
 from datetime import date
@@ -10,7 +11,8 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from app.auth.dependencies import CurrentUser, get_current_user
+from app.auth.dependencies import CurrentUser, require_role
+from app.documents.states import STARTUP
 from app.rules.completeness import CompletenessChecker
 from app.rules.engine import RuleEvaluator
 from app.rules.schema import (RuleGapError, RuleLoader, RuleSelection, SkippedRule, SkipReason,
@@ -196,12 +198,15 @@ class ReviewResponse(ReviewResult):
 
 
 @router.post("")
-async def create_review(body: ReviewRequest,
-                        strict: bool = Query(True, description="false = demo/testing only: includes unverified rules."),
-                        user: CurrentUser = Depends(get_current_user)) -> ReviewResponse:
+def create_review(body: ReviewRequest,
+                  strict: bool = Query(True, description="false = demo/testing only: includes unverified rules."),
+                  user: CurrentUser = Depends(require_role(STARTUP))) -> ReviewResponse:
+    # A plain def on purpose: FastAPI runs it in a worker thread, so this CPU-bound review does not
+    # block the event loop (and with it every other request on the single worker). run_review() stays
+    # async for its other callers; it never awaits anything, so asyncio.run() just drives it.
     try:
-        result = await run_review(body.contract_text, body.contract_type_id, strict=strict,
-                                  effective_date=body.effective_date)
+        result = asyncio.run(run_review(body.contract_text, body.contract_type_id, strict=strict,
+                                        effective_date=body.effective_date))
     except RuleGapError as e:
         # The rule files are wrong for this date. Fail loudly rather than review with a rule missing.
         raise HTTPException(500, f"Rule configuration error: {e}") from e

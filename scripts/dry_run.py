@@ -107,7 +107,8 @@ def run(client, tokens: dict, ctx: dict) -> None:
     r = client.get(f"/documents/{doc}", headers=b)
     report("2", "startup B cannot open A's document (404)", r.status_code == 404, detail(r))
 
-    # 3. the AI review (R10 pipeline, in the background), through the Layer 5 gate
+    # 3. the AI review (REVIEW_MODE=stub: labelled sample findings; REVIEW_MODE=pipeline: the R10 pipeline),
+    #    both in the background and both through the Layer 5 gate
     r = client.post(f"/documents/{doc}/review", headers=a)
     if not report("3", "review -> 202, under_ai_review", r.status_code == 202
                   and r.json().get("state") == "under_ai_review", detail(r)):
@@ -127,8 +128,14 @@ def run(client, tokens: dict, ctx: dict) -> None:
     created = created_rows[-1]["details"].get("count", 0) if created_rows else 0
     blocked = sum(1 for x in rows if x["action"] == "citation_blocked")
     # Strict mode is the production default: while every rule is unverified, 0 findings is the expected answer.
-    report("3", "findings_created recorded (0 is expected while every rule is unverified)", bool(created_rows),
-           f"stored {created}, blocked {blocked}")
+    stub = bool(created_rows) and bool(created_rows[-1]["details"].get("layers", {}).get("stub_review", {}).get("stub"))
+    report("3", "findings_created recorded (stub mode: sample findings; pipeline: 0 is expected while every "
+                "rule is unverified)", bool(created_rows), f"mode {'stub' if stub else 'pipeline'}, stored {created}, blocked {blocked}")
+    if stub:
+        findings_now = client.get(f"/documents/{doc}/findings", headers=law).json() or []
+        report("3", "stub mode: every stored finding is labelled [STUB]",
+               bool(findings_now) and all(str(i.get("description", "")).startswith("[STUB] ") for i in findings_now),
+               f"{len(findings_now)} findings")
 
     # 4. before sign-off the client view refuses, and shows nothing
     r = client.get(f"/documents/{doc}/client-findings", headers=a)

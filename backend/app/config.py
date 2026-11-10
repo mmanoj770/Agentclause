@@ -22,6 +22,12 @@ class Settings(BaseSettings):
     # checks it: the check does nothing until the variable exists, and the variable does nothing on old code.
     app_env: str = "development"
 
+    # How POST /documents/{id}/review runs: "stub" (the default: labelled sample findings, no model key,
+    # NDA only) or "pipeline" (the real R2 to R9 review, which calls Gemini for intake and needs
+    # GEMINI_API_KEY). Switch to pipeline only with a paid key, cost limits and the data-handling
+    # agreement checked against docs/dpdp_intake_note.md.
+    review_mode: str = "stub"
+
     database_url: str = "postgresql://postgres:postgres@127.0.0.1:54322/postgres"
     supabase_url: str = "http://127.0.0.1:54321"
     # Comma-separated browser origins allowed by CORS (no "*"). Kept as a str because
@@ -86,7 +92,10 @@ class Settings(BaseSettings):
         mode = self.app_env.strip().lower()
         if mode not in ("development", "production"):
             raise RuntimeError("APP_ENV must be 'development' or 'production'")
-        logger.info("startup mode=%s", mode)
+        review_mode = self.review_mode.strip().lower()
+        if review_mode not in ("stub", "pipeline"):
+            raise RuntimeError("REVIEW_MODE must be 'stub' or 'pipeline'")
+        logger.info("startup mode=%s review_mode=%s", mode, review_mode)
         if mode != "production":
             return
         problems = []
@@ -96,6 +105,8 @@ class Settings(BaseSettings):
             problems.append("SUPABASE_URL")
         if not self.cors_origins or any(_is_local(o) for o in self.cors_origins):
             problems.append("CORS_ALLOWED_ORIGINS")
+        if review_mode == "pipeline" and not self.gemini_api_key.strip():
+            problems.append("GEMINI_API_KEY (needed because REVIEW_MODE=pipeline)")
         if problems:
             raise RuntimeError("Refusing to start in production: these settings are missing or still "
                                "local-development values: " + ", ".join(problems))

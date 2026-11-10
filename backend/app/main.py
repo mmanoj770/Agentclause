@@ -23,7 +23,7 @@ async def lifespan(app: FastAPI):
     pool.open()
     try:
         from app.pipeline.runner import recover_stale_reviews
-        with pool.connection(timeout=0.1) as conn:
+        with pool.connection(timeout=10) as conn:
             recover_stale_reviews(conn)
     except Exception as exc:
         # Don't fail server startup if the database is not reachable yet or unmigrated, but say so:

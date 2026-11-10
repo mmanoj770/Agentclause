@@ -145,9 +145,26 @@ def test_review_mode_is_logged_next_to_the_app_env_line(caplog):
     assert "startup mode=development review_mode=stub" in caplog.text
 
 
-def test_unknown_review_mode_refuses():
-    with pytest.raises(RuntimeError, match="REVIEW_MODE"):
-        _settings(review_mode="live").check_startup()
+def test_unknown_review_mode_is_refused_when_the_settings_load():
+    with pytest.raises(ValueError, match="REVIEW_MODE"):
+        _settings(review_mode="live")
+
+
+@pytest.mark.parametrize("raw", ["Stub", " STUB ", "stub"])
+def test_review_mode_is_normalised_once_so_startup_and_route_agree(raw):
+    assert _settings(review_mode=raw).review_mode == "stub"
+
+
+def test_review_mode_from_the_environment_is_normalised_too(monkeypatch):
+    monkeypatch.setenv("REVIEW_MODE", "  Pipeline ")
+    assert _settings().review_mode == "pipeline"
+
+
+def test_a_capitalised_mode_still_sends_the_route_to_the_stub(route, monkeypatch):
+    """The bug this guards: 'Stub' passed startup as stub, then the route's == 'stub' ran the pipeline."""
+    monkeypatch.setattr(agents_router, "settings", _settings(review_mode="Stub"))
+    assert route.post().status_code == 202
+    assert route.seen == {"task": "stub"}
 
 
 def test_production_pipeline_mode_without_a_gemini_key_refuses_and_names_the_setting():

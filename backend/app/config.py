@@ -1,6 +1,7 @@
 import logging
 from pathlib import Path
-from pydantic import Field
+from typing import Literal
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
@@ -26,7 +27,17 @@ class Settings(BaseSettings):
     # NDA only) or "pipeline" (the real R2 to R9 review, which calls Gemini for intake and needs
     # GEMINI_API_KEY). Switch to pipeline only with a paid key, cost limits and the data-handling
     # agreement checked against docs/dpdp_intake_note.md.
-    review_mode: str = "stub"
+    review_mode: Literal["stub", "pipeline"] = "stub"
+
+    @field_validator("review_mode", mode="before")
+    @classmethod
+    def _normalise_review_mode(cls, value):
+        """Trim and lowercase once, here, so every reader (startup check, route) sees the same value:
+        REVIEW_MODE=Stub means stub everywhere. Anything else is refused when the settings load."""
+        mode = value.strip().lower() if isinstance(value, str) else value
+        if mode not in ("stub", "pipeline"):
+            raise ValueError("REVIEW_MODE must be 'stub' or 'pipeline'")
+        return mode
 
     database_url: str = "postgresql://postgres:postgres@127.0.0.1:54322/postgres"
     supabase_url: str = "http://127.0.0.1:54321"
@@ -92,9 +103,7 @@ class Settings(BaseSettings):
         mode = self.app_env.strip().lower()
         if mode not in ("development", "production"):
             raise RuntimeError("APP_ENV must be 'development' or 'production'")
-        review_mode = self.review_mode.strip().lower()
-        if review_mode not in ("stub", "pipeline"):
-            raise RuntimeError("REVIEW_MODE must be 'stub' or 'pipeline'")
+        review_mode = self.review_mode  # already normalised and validated by the setting itself
         logger.info("startup mode=%s review_mode=%s", mode, review_mode)
         if mode != "production":
             return

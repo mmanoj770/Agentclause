@@ -9,6 +9,7 @@ from app.users.router import router as users_router
 
 # INFO lines from our own code (intake usage, startup mode) are dropped unless a handler exists:
 # uvicorn only configures its own loggers. Scoped to "app" so libraries keep their default level.
+log = logging.getLogger(__name__)
 _app_logger = logging.getLogger("app")
 if not _app_logger.handlers:
     _handler = logging.StreamHandler()
@@ -24,9 +25,12 @@ async def lifespan(app: FastAPI):
         from app.pipeline.runner import recover_stale_reviews
         with pool.connection(timeout=0.1) as conn:
             recover_stale_reviews(conn)
-    except Exception:
-        # Don't fail server startup if database is not reachable yet or unmigrated
-        pass
+    except Exception as exc:
+        # Don't fail server startup if the database is not reachable yet or unmigrated, but say so:
+        # documents left in under_ai_review stay there until this runs. Class name only, no message,
+        # so a connection error cannot put host or credentials details into the log.
+        log.error("startup: recover_stale_reviews failed (%s); documents left in under_ai_review "
+                  "were not recovered", type(exc).__name__)
     yield
     pool.close()
 

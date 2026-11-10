@@ -1,21 +1,36 @@
 # AgentClause: Project Status (Backend & Review Agent)
 
-**Status as of**: 7 November 2026  
-**Repository Branch**: `blockers-prep` (Commit `885c114`, pushed to `origin/blockers-prep`)  
+**Status as of**: 8 November 2026 (19:10 IST)  
+**Repository Branch**: `blockers-prep` (Commit `08acbce`, pushed to `origin/blockers-prep`)  
 **Base Commit**: `origin/main` (`41fbc94`)  
-**Backend Test Suite**: **1001 passed, 38 skipped, 0 failed** in 7.80s (31 access test skips needing live tokens + 7 known skipped tests)  
-**Live Database**: Supabase (`pmrkwctwjqhrhkwtjrbz`, `ap-south-1` Mumbai) · 21 migrations live and verified
+**Backend Test Suite**: **1001 passed, 38 skipped, 0 failed** in 7.42s (31 access test skips needing live tokens + 7 known skipped tests)  
+**Live Database**: Supabase (`pmrkwctwjqhrhkwtjrbz`, `ap-south-1` Mumbai) · 21 migrations live and verified  
+**Authentication State**: **Legacy API keys disabled on live** · Publishable key (`sb_publishable_...`) active
 
 ---
 
 ## Executive Summary
 
-1. **Review Agent (R1–R11) Architecture Complete in Code**:
+1. **Legacy Key Disable Window (8 Nov 2026, 19:00–19:06 IST) — 100% PASS**:
+   - **Legacy Keys Disabled**: Both the legacy `anon` (`eyJ...`) and legacy `service_role` (`eyJ...`) keys were disabled via toggle in the Supabase Dashboard.
+   - **Local Environment Cutover**: `.env.local` and `.env.local.backup` were cleanly switched over to the new Supabase publishable key (`sb_publishable_CL7UK...`) with zero references to the legacy key remaining.
+   - **Live Smoke & Isolation Verification**:
+     - **Client Sign-in**: Fresh login succeeded; document upload and document list pages loaded cleanly.
+     - **Advocate Sign-in**: Private-window login succeeded; dashboard and consultation request views loaded cleanly.
+     - **`scripts/e2e_upload.py`**: **ALL PASS** (Tenant A and B uploads verified; cross-org upload-url, confirm, and download-url strictly refused with 403/404 in both directions with zero version leakage).
+     - **`scripts/dry_run.py`**: **ALL PASS** (Full pipeline review, lawyer sign-off, client view sanitization, chat, and audit logging all passed; role permissions strictly enforced preventing lawyer from marking `delivered` with 403).
+   - **Cleanup Tracking**: 3 test documents identified and tracked for post-window cleanup:
+     1. `cd8387e9-10a3-4aa5-a98f-123779109df6`
+     2. `26df2e7b-1128-461b-acd6-1ceaf24bb65b`
+     3. `f009e905-ac8e-471d-9b2f-ae5ab1f298fb`
+   - **Revocation Status**: Keys remain disabled overnight without incident; Arjun reviewing server logs tomorrow morning (Mon 9 Nov) before permanent revocation is scheduled.
+
+2. **Review Agent (R1–R11) Operational Status**:
    - The entire Review Agent pipeline is merged, tested, and runnable end-to-end.
    - **Demo Mode (`strict=False`)**: Fully functional. Ingests contracts, detects missing mandatory clauses, verifies Indian statutory compliance (ICA, MSMED Act, CPC), scores one-sided risk asymmetry, gates citations, triages document risk tiers, and transitions states to `pending_lawyer_review`. Detects 6/6 planted defects in synthetic test fixtures (`nda_bad`, `nda_clean`, `vendor_msme`).
    - **Strict Mode (`strict=True`, Production Default)**: Fully active and fails safe. Evaluates only verified rules. Because seed statutory quotes and clause configurations await advocate sign-off, the engine cleanly skips unverified rules and returns an explicit `review_status="no_rules_verified"` with `rules_evaluated=0` and full `coverage` metadata. It **never** gives unverified contracts a false "clean bill of health".
 
-2. **All Engineering Blocker Tasks Completed & Pushed on `blockers-prep`**:
+3. **All Engineering Blocker Tasks Completed & Pushed on `blockers-prep`**:
    - **Task 1 (Sample Provenance)**: Renamed `sample_gem_procurement` to `sample_stub` and isolated synthetic stubs from aggregate metrics in [`scripts/benchmark_public_contracts.py`](file:///Users/manojmj/Agentclause/scripts/benchmark_public_contracts.py).
    - **Task 2 (Single Source of Truth for Statute Quotes)**: Implemented `normalize_statute_quote()`, dual-store parity assertions between `rules/` and `seed_statutes.json`, codified known asymmetries (CPC s. 20), and added store tracking columns in [`docs/advocate_review_pack.csv`](file:///Users/manojmj/Agentclause/docs/advocate_review_pack.csv).
    - **Task 3 (Advocate Review Applier Safety Guards)**: Added atomic dual-store updates, in-memory rollback on failure, `--dry-run` and `--apply` flags, mandatory advocate name/date validation, and quote-modification refusal without an India Code URL in [`scripts/apply_advocate_review.py`](file:///Users/manojmj/Agentclause/scripts/apply_advocate_review.py).
@@ -25,22 +40,24 @@
    - **Task 7 (Safe Failure Surfaces)**: Handled R7 `side=None` returning `side_unknown=True` and 0.0 score; added `provisional=True` flags in R7 asymmetry, R9 triage, and `/queue` when configs are `PLACEHOLDER`; propagated `coverage` and `review_status` to API schemas; verified strict mode returns `review_status="no_rules_verified"` on synthetic fixtures.
    - **Task 8 (Expiration Guard Test)**: Added automated CI test in [`backend/tests/test_finding_views.py`](file:///Users/manojmj/Agentclause/backend/tests/test_finding_views.py) failing CI starting November 8, 2026 if `ID_ALIAS_UNTIL` (2026-11-15) is not removed or extended.
    - **Task 9 (Outreach Packs & Master Tracking Table)**: Prepared dedicated outreach briefs in [`docs/outreach/`](file:///Users/manojmj/Agentclause/docs/outreach/) (`advocate.md`, `arjun.md`, `tejaswi.md`, `poornaa.md`, `compliance.md`) and centralized human action items in [`docs/HUMAN_ACTIONS.md`](file:///Users/manojmj/Agentclause/docs/HUMAN_ACTIONS.md).
+   - **Task 10 (Master Documentation)**: Compiled comprehensive [AgentClause Master Guide](file:///Users/manojmj/Agentclause/docs/AGENTCLAUSE_MASTER_GUIDE.md) detailing project history from Day 1, R1–R11 layer mechanics, security posture, and legal engineering fundamentals.
 
-3. **Zero Premature Verifications**: All legal rules, quotes, and configs remain strictly `unverified` pending advocate sign-off.
+4. **Zero Premature Verifications**: All legal rules, quotes, and configs remain strictly `unverified` pending advocate sign-off.
 
 ---
 
-## 1. At a Glance Matrix
+## 1. At a Glance Status Matrix
 
-| Area | Current State | Target / Blocker |
+| Component / Area | Status | Next Milestone / Dependency |
 |---|---|---|
-| **Backend Core** | Done, on `main` | Auth, documents, S3 storage, findings, queue, audit operational. |
-| **Database** | Live & healthy | 21 migrations live. Migration 22 prepared (file only). |
-| **Review Agent (R1–R11)** | Complete in code | Demo mode 100% operational; Strict mode fails safe pending sign-offs. |
-| **Blockers Branch** | `blockers-prep` (`885c114`) | 17 commits ahead of `main`; PR ready for review and merge. |
-| **Test Suite** | **1001 passed, 38 skipped, 0 failed** | Zero failures permitted; full suite green in 7.80s. |
-| **Advocate Review Pack** | Prepared & guarded | `advocate_review_pack.csv` & `.md` ready; apply script guarded. |
-| **Human Actions Matrix** | Fully mapped | 11 tracked items across Advocate, Tejaswi, Arjun, Poornaa, Compliance, Counsel. |
+| **Backend Core** | Done, on `main` | Auth (JWKS ES256/RS256), documents, S3 presigned storage, findings, lawyer queue. |
+| **Authentication Posture** | **Hardened (Live)** | Legacy keys disabled; publishable key verified across live sign-in and E2E runs. |
+| **Database** | Live & healthy | 21 migrations live. Migrations 20 & 22 queued for deploy window. |
+| **Review Agent (R1–R11)** | Complete in code | Demo mode 100% operational; Strict mode fails safe pending advocate sign-offs. |
+| **Blockers Branch** | `blockers-prep` (`08acbce`) | 18 commits ahead of `main`; PR ready for review and merge. |
+| **Test Suite** | **1001 passed, 38 skipped, 0 failed** | Zero failures permitted; full suite green in 7.42s. |
+| **Advocate Review Pack** | Prepared & guarded | `advocate_review_pack.csv` ready; atomic `apply_advocate_review.py` guarded. |
+| **Human Actions Matrix** | Fully mapped | Tracked in `docs/HUMAN_ACTIONS.md` across Advocate, Tejaswi, Arjun, Poornaa, Compliance, Counsel. |
 
 ---
 
@@ -62,23 +79,58 @@
 
 ---
 
-## 3. Human Actions & Blocker Resolution Roadmap
+## 3. Remaining Works by Owner
 
-All technical preparations are complete. Production readiness requires completion of the following human-only actions tracked in [`docs/HUMAN_ACTIONS.md`](file:///Users/manojmj/Agentclause/docs/HUMAN_ACTIONS.md):
+Every engineering blocker that can be resolved in code has been completed. The remaining tasks are strictly human legal decisions, cross-team plumbing, and live deployment operations:
 
-| Item # | Owner | Task & Deliverable | Blocking Layers | Prepared Tools / Artifacts |
-|:---:|:---|:---|:---:|:---|
-| **HA-01** | **Advocate** (Legal Counsel) | Verify 7 statutory seed quotes against India Code | **R4, R5, R8** | [`docs/advocate_review_pack.csv`](file:///Users/manojmj/Agentclause/docs/advocate_review_pack.csv)<br>[`scripts/apply_advocate_review.py`](file:///Users/manojmj/Agentclause/scripts/apply_advocate_review.py)<br>[`docs/outreach/advocate.md`](file:///Users/manojmj/Agentclause/docs/outreach/advocate.md) |
-| **HA-02** | **Advocate** (Legal Counsel) | Sign off on mandatory NDA clause list | **R3** | [`nda_required_clauses.json`](file:///Users/manojmj/Agentclause/backend/app/rules/config/nda_required_clauses.json)<br>[`docs/advocate_review_pack.md`](file:///Users/manojmj/Agentclause/docs/advocate_review_pack.md) |
-| **HA-03** | **Compliance / DPO** | Sign off on DPDP Section 16 data transit & customer consent | **R2, R10** | [`docs/dpdp_intake_note.md`](file:///Users/manojmj/Agentclause/docs/dpdp_intake_note.md)<br>[`docs/outreach/compliance.md`](file:///Users/manojmj/Agentclause/docs/outreach/compliance.md) |
-| **HA-04** | **Arjun** | Wire Citation Gate to `public.statutes` table | **R8** | [`docs/statutes_matching_rule.md`](file:///Users/manojmj/Agentclause/docs/statutes_matching_rule.md)<br>[`app.statutes.section_matches`](file:///Users/manojmj/Agentclause/backend/app/statutes/normalizer.py)<br>[`docs/outreach/arjun.md`](file:///Users/manojmj/Agentclause/docs/outreach/arjun.md) |
-| **HA-05** | **Arjun** | Finding citation token extraction & case-law index | **R8** | [`docs/outreach/arjun.md`](file:///Users/manojmj/Agentclause/docs/outreach/arjun.md) |
-| **HA-06** | **Poornaa** | Provide structured clause manifest schema (R8 #7) | **R6, R7, R8** | [`docs/outreach/poornaa.md`](file:///Users/manojmj/Agentclause/docs/outreach/poornaa.md) |
-| **HA-07** | **Legal Counsel** (Partner) | Calibrate risk triage weights (`triage.json`) | **R9** | [`backend/app/pipeline/config/triage.json`](file:///Users/manojmj/Agentclause/backend/app/pipeline/config/triage.json) |
-| **HA-08** | **Legal Counsel** (Partner) | Calibrate risk asymmetry provision weights (`asymmetry.json`) | **R7** | [`backend/app/pipeline/config/asymmetry.json`](file:///Users/manojmj/Agentclause/backend/app/pipeline/config/asymmetry.json) |
-| **HA-09** | **Tejaswi** | Deploy migrations 20, 21, and 22 during deploy window | **All DB** | [`20261105100000_22_statutes_verified_guard.sql`](file:///Users/manojmj/Agentclause/supabase/migrations/20261105100000_22_statutes_verified_guard.sql)<br>[`scripts/preflight_21.sql`](file:///Users/manojmj/Agentclause/scripts/preflight_21.sql)<br>[`scripts/preflight_22.sql`](file:///Users/manojmj/Agentclause/scripts/preflight_22.sql) |
-| **HA-10** | **Tejaswi** | Review and merge PR `blockers-prep` into `main` | **Main Branch** | [PR Link](https://github.com/mmanoj770/Agentclause/pull/new/blockers-prep)<br>[`docs/outreach/tejaswi.md`](file:///Users/manojmj/Agentclause/docs/outreach/tejaswi.md) |
-| **HA-11** | **Engineering** | Deprecate Finding `id` alias before November 15, 2026 | **API Schemas** | [`backend/tests/test_finding_views.py`](file:///Users/manojmj/Agentclause/backend/tests/test_finding_views.py) |
+### A. Tejaswi (Lead / Deployments)
+1. **Morning Log Review (Mon 9 Nov)**:
+   - Verify journal logs following overnight run with legacy keys disabled.
+2. **Deploy Migrations**:
+   - Apply Migration 20 (idempotent constraint fix).
+   - Apply Migration 22 ([`22_statutes_verified_guard.sql`](file:///Users/manojmj/Agentclause/supabase/migrations/20261105100000_22_statutes_verified_guard.sql) trigger).
+3. **Merge Pull Request**:
+   - Review and merge branch `blockers-prep` into `main` ([PR Link](https://github.com/mmanoj770/Agentclause/pull/new/blockers-prep)).
+4. **Merge C9 Chat Endpoint**:
+   - Merge `origin/tejaswi` to connect the real conversational chat endpoint after deploy window.
+5. **Permanent Key Revocation**:
+   - Execute permanent revocation of legacy keys in Supabase dashboard 24–48 hours post-disable (Tue 10 Nov).
+
+### B. Advocate (Legal Counsel)
+1. **Statutory Quote Verification (`HA-01`)**:
+   - Review 7 seed statutory quotes in [`docs/advocate_review_pack.csv`](file:///Users/manojmj/Agentclause/docs/advocate_review_pack.csv) against official India Code URLs.
+   - Run `python scripts/apply_advocate_review.py --apply` to atomically promote verified quotes.
+2. **NDA Required Clauses Sign-off (`HA-02`)**:
+   - Verify and sign off on [`nda_required_clauses.json`](file:///Users/manojmj/Agentclause/backend/app/rules/config/nda_required_clauses.json) to unblock strict mode R3 evaluation.
+
+### C. Compliance & DPO
+1. **DPDP Section 16 Data Transit Review (`HA-03`)**:
+   - Sign off on Google Cloud Gemini enterprise DPA terms, global data transit disclosure, and customer upload consent language in [`docs/dpdp_intake_note.md`](file:///Users/manojmj/Agentclause/docs/dpdp_intake_note.md).
+
+### D. Arjun (Citation Gate & Statutes DB)
+1. **Database-Backed Citation Gate (`HA-04`)**:
+   - In `backend/app/agents/citation_gate.py`, replace `StubFixtureCorpus` lookup with live database querying against `public.statutes` using [`section_matches()`](file:///Users/manojmj/Agentclause/backend/app/statutes/normalizer.py) from `app.statutes`.
+2. **Citation Extraction & Case-Law Index (`HA-05`)**:
+   - Extract `(act, section)` tokens from finding descriptions and connect case-law precedent lookups.
+
+### E. Poornaa (Drafting Agent)
+1. **Clause Manifest Schema (`HA-06`)**:
+   - Deliver structured clause manifest schema for contract versions so R6 consistency and R7 asymmetry findings pass write-time citation screening.
+
+### F. Partner Counsel (Calibration)
+1. **Triage Severity Weights (`HA-07`)**:
+   - Calibrate severity weights in [`backend/app/pipeline/config/triage.json`](file:///Users/manojmj/Agentclause/backend/app/pipeline/config/triage.json) to replace `status: "PLACEHOLDER"`.
+2. **Asymmetry Provision Baselines (`HA-08`)**:
+   - Calibrate market baselines in [`backend/app/pipeline/config/asymmetry.json`](file:///Users/manojmj/Agentclause/backend/app/pipeline/config/asymmetry.json) to replace `status: "PLACEHOLDER"`.
+
+### G. Engineering / Manoj
+1. **Test Document Cleanup**:
+   - Purge the 3 test documents created during tonight's window:
+     - `cd8387e9-10a3-4aa5-a98f-123779109df6`
+     - `26df2e7b-1128-461b-acd6-1ceaf24bb65b`
+     - `f009e905-ac8e-471d-9b2f-ae5ab1f298fb`
+2. **Deprecate Finding `id` Alias (`HA-11`)**:
+   - Remove `id` property from `_FindingId` in `backend/app/findings/schemas.py` before 22 November 2026 (`ID_ALIAS_UNTIL` bumped from 15 Nov to 22 Nov to allow post-deploy client migration).
 
 ---
 
@@ -86,9 +138,9 @@ All technical preparations are complete. Production readiness requires completio
 
 - **PR Branch**: `blockers-prep`
 - **PR URL**: `https://github.com/mmanoj770/Agentclause/pull/new/blockers-prep`
-- **Commits Ahead of Main**: 17 commits
+- **Commits Ahead of Main**: 18 commits
 - **Test Suite Verification**:
   ```bash
   cd backend && PYTHONPATH=. .venv/bin/pytest -q tests
-  # 1001 passed, 38 skipped, 0 failed in 7.80s
+  # 1001 passed, 38 skipped, 0 failed in 7.42s
   ```

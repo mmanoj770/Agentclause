@@ -144,7 +144,7 @@ The document state machine enforces strict lifecycle transitions:
 - **Location**: `backend/app/schemas/finding.py`, `backend/app/findings/`
 - **Purpose**: Defines the universal schema contract for findings across all pipeline layers.
 - **Core Model**: `Finding`
-  - `id`: UUID (with temporary backward-compatibility alias `ID_ALIAS_UNTIL = 2026-11-15`).
+  - `id`: UUID (with temporary backward-compatibility alias `ID_ALIAS_UNTIL = 2026-11-22`).
   - `document_id`, `document_version_id`: Tenancy and version bindings.
   - `layer`: Enum (`COMPLETENESS`, `STATUTORY`, `CONSISTENCY`, `RISK_ASYMMETRY`).
   - `severity`: Enum (`CRITICAL`, `HIGH`, `MEDIUM`, `LOW`, `INFO`).

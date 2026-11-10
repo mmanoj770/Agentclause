@@ -2,7 +2,7 @@
 
 **Repository**: `AgentClause`  
 **Branch**: `blockers-prep`  
-**Last Updated**: November 4, 2026  
+**Last Updated**: November 8, 2026 (Post Key-Disable Window)  
 **Purpose**: Comprehensive tracking of every human-only decision, verification, and external dependency required to transition the AgentClause review agent from interim/staging to full production readiness.
 
 ---
@@ -19,9 +19,11 @@
 | **HA-06** | **Poornaa** | Clause Manifest (R8 #7) & Drafting Agent Interface (D1–D8) | **R6, R7, R8** | Deliver structured clause manifest schema so R6 consistency and R7 asymmetry findings pass the gate. | [outreach/poornaa.md](file:///Users/manojmj/Agentclause/docs/outreach/poornaa.md) | Next Sprint |
 | **HA-07** | **Legal Counsel** (Partner) | Calibration of Risk Triage Weights (`triage.json`) | **R9** | Calibrate severity points, asymmetry weights, and review tier thresholds; replace `status: "PLACEHOLDER"`. | [triage.json](file:///Users/manojmj/Agentclause/backend/app/pipeline/config/triage.json) | Pre-General Availability |
 | **HA-08** | **Legal Counsel** (Partner) | Calibration of Risk Asymmetry Baselines (`asymmetry.json`) | **R7** | Calibrate provision weights and provide market baselines for contract types; replace `status: "PLACEHOLDER"`. | [asymmetry.json](file:///Users/manojmj/Agentclause/backend/app/pipeline/config/asymmetry.json) | Pre-General Availability |
-| **HA-09** | **Tejaswi** | Migration Sequencing (19 -> 20 -> 21 -> 22) | **All DB** | Confirm migration 19 clean on live; deploy 20 (idempotent), 21 (statutes), and 22 (trigger guard). | [22_statutes_verified_guard.sql](file:///Users/manojmj/Agentclause/supabase/migrations/20261105100000_22_statutes_verified_guard.sql)<br>[preflight_21.sql](file:///Users/manojmj/Agentclause/scripts/preflight_21.sql)<br>[preflight_22.sql](file:///Users/manojmj/Agentclause/scripts/preflight_22.sql) | Scheduled Deploy Window |
-| **HA-10** | **Tejaswi** | Review and Merge PR `blockers-prep` | **Main Branch** | Review PR on GitHub; merge to `main` following successful deployment window. | [outreach/tejaswi.md](file:///Users/manojmj/Agentclause/docs/outreach/tejaswi.md) | Post-Deploy Window |
-| **HA-11** | **Engineering Team** | Deprecation of Finding `id` Alias (`ID_ALIAS_UNTIL`) | **API Schemas** | Remove `id` property from `_FindingId` in `app/findings/schemas.py` before November 15, 2026. | [test_finding_views.py](file:///Users/manojmj/Agentclause/backend/tests/test_finding_views.py) | November 8–15, 2026 |
+| **HA-09** | **Tejaswi** | Migration Sequencing (20 -> 21 -> 22) | **All DB** | Confirm migration 19 clean on live; deploy 20 (idempotent), 21 (statutes), and 22 (trigger guard). | [22_statutes_verified_guard.sql](file:///Users/manojmj/Agentclause/supabase/migrations/20261105100000_22_statutes_verified_guard.sql)<br>[preflight_21.sql](file:///Users/manojmj/Agentclause/scripts/preflight_21.sql)<br>[preflight_22.sql](file:///Users/manojmj/Agentclause/scripts/preflight_22.sql) | Scheduled Deploy Window |
+| **HA-10** | **Tejaswi** | Review and Merge PR `blockers-prep` | **Main Branch** | Review PR on GitHub; merge to `main` following successful deployment window. | [PR Link](https://github.com/mmanoj770/Agentclause/pull/new/blockers-prep)<br>[outreach/tejaswi.md](file:///Users/manojmj/Agentclause/docs/outreach/tejaswi.md) | Post-Deploy Window |
+| **HA-11** | **Engineering Team** | Deprecation of Finding `id` Alias (`ID_ALIAS_UNTIL`) | **API Schemas** | Remove `id` property from `_FindingId` in `app/findings/schemas.py` before November 22, 2026 (`ID_ALIAS_UNTIL` extended to 22 Nov). | [test_finding_views.py](file:///Users/manojmj/Agentclause/backend/tests/test_finding_views.py) | November 15–22, 2026 |
+| **HA-12** | **Engineering / Manoj** | Post-Deploy Test Document Cleanup | **Live DB** | Purge 3 test documents created during key-disable window (`cd8387e9...`, `26df2e7b...`, `f009e905...`). | Live Database Cleanup Script | November 9, 2026 |
+| **HA-13** | **Tejaswi / Team** | Permanent Revocation of Legacy Keys | **Supabase API** | Permanently revoke disabled legacy keys in Supabase dashboard 24–48 hours post-disable. | Supabase Dashboard | November 10, 2026 |
 
 ---
 

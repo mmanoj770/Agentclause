@@ -36,7 +36,7 @@ class AdjudicateIn(BaseModel):
 # `finding_id` is the canonical id of a finding. `id` is kept as a deprecated alias so a client that
 # still reads `id` keeps working until the integration day. It is removed after this date
 # (tests/test_finding_views.py fails once the date has passed, so the alias cannot outlive it).
-ID_ALIAS_UNTIL = date(2026, 11, 15)
+ID_ALIAS_UNTIL = date(2026, 11, 22)
 
 
 class _FindingId(BaseModel):

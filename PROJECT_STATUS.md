@@ -3,7 +3,7 @@
 **Status as of**: 8 November 2026 (19:10 IST)  
 **Repository Branch**: `blockers-prep` (Commit `08acbce`, pushed to `origin/blockers-prep`)  
 **Base Commit**: `origin/main` (`41fbc94`)  
-**Backend Test Suite**: **1001 passed, 38 skipped, 0 failed** in 7.42s (31 access test skips needing live tokens + 7 known skipped tests)  
+**Backend Test Suite**: **994 passed, 38 skipped, 0 failed** in 12.40s (31 access test skips needing live tokens + 7 known skipped tests)  
 **Live Database**: Supabase (`pmrkwctwjqhrhkwtjrbz`, `ap-south-1` Mumbai) · 21 migrations live and verified  
 **Authentication State**: **Legacy API keys disabled on live** · Publishable key (`sb_publishable_...`) active
 
@@ -38,7 +38,7 @@
    - **Task 5 (Statute Verification Tooling & Section Matching)**: Hardened [`scripts/verify_statute.py`](file:///Users/manojmj/Agentclause/scripts/verify_statute.py) with mandatory advocate credentials and audit logging; hardened [`scripts/load_statutes.py`](file:///Users/manojmj/Agentclause/scripts/load_statutes.py) with per-row SHA-256 drift detection; implemented `section_matches()` in [`backend/app/statutes/normalizer.py`](file:///Users/manojmj/Agentclause/backend/app/statutes/normalizer.py) and exported from [`app.statutes`](file:///Users/manojmj/Agentclause/backend/app/statutes/__init__.py) with specification in [`docs/statutes_matching_rule.md`](file:///Users/manojmj/Agentclause/docs/statutes_matching_rule.md).
    - **Task 6 (Intake PII Redaction Hardening)**: Hardened DPDP redaction regexes in [`backend/app/intake/service.py`](file:///Users/manojmj/Agentclause/backend/app/intake/service.py) protecting Indian currencies (`12,50,000`, `Rs. 5,00,000`, `INR 1,25,00,000`), clause numbers, dates, and invoice IDs; added automatic retry on garbled/altered placeholders (`[PAN_1]` -> `[PAN_2]`); updated [`docs/dpdp_intake_note.md`](file:///Users/manojmj/Agentclause/docs/dpdp_intake_note.md) with explicit disclosure of unredacted entities.
    - **Task 7 (Safe Failure Surfaces)**: Handled R7 `side=None` returning `side_unknown=True` and 0.0 score; added `provisional=True` flags in R7 asymmetry, R9 triage, and `/queue` when configs are `PLACEHOLDER`; propagated `coverage` and `review_status` to API schemas; verified strict mode returns `review_status="no_rules_verified"` on synthetic fixtures.
-   - **Task 8 (Expiration Guard Test)**: Added automated CI test in [`backend/tests/test_finding_views.py`](file:///Users/manojmj/Agentclause/backend/tests/test_finding_views.py) failing CI starting November 8, 2026 if `ID_ALIAS_UNTIL` (2026-11-15) is not removed or extended.
+   - **Task 8 (Finding `id` Alias Removal)**: Completed permanent removal of the deprecated `id` alias property and `ID_ALIAS_UNTIL` in [`backend/app/findings/schemas.py`](file:///Users/manojmj/Agentclause/backend/app/findings/schemas.py) per Tejaswi's directive (merged from `origin/arjun-alias`, commit `eec4e08`). All finding response models use `finding_id` only.
    - **Task 9 (Outreach Packs & Master Tracking Table)**: Prepared dedicated outreach briefs in [`docs/outreach/`](file:///Users/manojmj/Agentclause/docs/outreach/) (`advocate.md`, `arjun.md`, `tejaswi.md`, `poornaa.md`, `compliance.md`) and centralized human action items in [`docs/HUMAN_ACTIONS.md`](file:///Users/manojmj/Agentclause/docs/HUMAN_ACTIONS.md).
    - **Task 10 (Master Documentation)**: Compiled comprehensive [AgentClause Master Guide](file:///Users/manojmj/Agentclause/docs/AGENTCLAUSE_MASTER_GUIDE.md) detailing project history from Day 1, R1–R11 layer mechanics, security posture, and legal engineering fundamentals.
 
@@ -55,7 +55,7 @@
 | **Database** | Live & healthy | 21 migrations live. Migrations 20 & 22 queued for deploy window. |
 | **Review Agent (R1–R11)** | Complete in code | Demo mode 100% operational; Strict mode fails safe pending advocate sign-offs. |
 | **Blockers Branch** | `blockers-prep` (`08acbce`) | 18 commits ahead of `main`; PR ready for review and merge. |
-| **Test Suite** | **1001 passed, 38 skipped, 0 failed** | Zero failures permitted; full suite green in 7.42s. |
+| **Test Suite** | **994 passed, 38 skipped, 0 failed** | Zero failures permitted; full suite green in 12.40s. |
 | **Advocate Review Pack** | Prepared & guarded | `advocate_review_pack.csv` ready; atomic `apply_advocate_review.py` guarded. |
 | **Human Actions Matrix** | Fully mapped | Tracked in `docs/HUMAN_ACTIONS.md` across Advocate, Tejaswi, Arjun, Poornaa, Compliance, Counsel. |
 
@@ -129,8 +129,8 @@ Every engineering blocker that can be resolved in code has been completed. The r
      - `cd8387e9-10a3-4aa5-a98f-123779109df6`
      - `26df2e7b-1128-461b-acd6-1ceaf24bb65b`
      - `f009e905-ac8e-471d-9b2f-ae5ab1f298fb`
-2. **Deprecate Finding `id` Alias (`HA-11`)**:
-   - Remove `id` property from `_FindingId` in `backend/app/findings/schemas.py` before 22 November 2026 (`ID_ALIAS_UNTIL` bumped from 15 Nov to 22 Nov to allow post-deploy client migration).
+2. **Deprecate Finding `id` Alias (`HA-11`) - COMPLETE**:
+   - Permanently removed `id` property from `_FindingId` in `backend/app/findings/schemas.py` and dropped `ID_ALIAS_UNTIL` per Tejaswi's directive (merged from `origin/arjun-alias`, `eec4e08`). Tests updated to require `finding_id` only.
 
 ---
 
@@ -142,5 +142,5 @@ Every engineering blocker that can be resolved in code has been completed. The r
 - **Test Suite Verification**:
   ```bash
   cd backend && PYTHONPATH=. .venv/bin/pytest -q tests
-  # 1001 passed, 38 skipped, 0 failed in 7.42s
+  # 994 passed, 38 skipped, 0 failed in 12.40s
   ```

@@ -100,7 +100,7 @@ Engineered 10 mission-critical tasks on branch `blockers-prep`, scaling the test
 - **Task 5 (`5e61fcc`)**: Built `section_matches()` supporting `exact`, `subsection`, and `parent` hierarchical resolution while strictly blocking false positives. Hardened `verify_statute.py` and `load_statutes.py`.
 - **Task 6 (`8c6ab46`)**: Hardened DPDP PII redaction protecting Indian currencies (`12,50,000`, `Rs. 5,00,000`), dates, and clause numbers, with retry on altered placeholders.
 - **Task 7 (`42f933e`)**: Engineered safe failure surfaces: `side_unknown=True` when organization matching is ambiguous; `provisional=True` flags on interim weights; verified strict mode returns `review_status="no_rules_verified"`.
-- **Task 8 (`35d85ce`)**: Added CI automated expiration guard test for `ID_ALIAS_UNTIL`.
+- **Task 8 (`35d85ce` / `eec4e08`)**: Handled deprecation of `ID_ALIAS_UNTIL`; permanently removed deprecated `id` alias in favor of canonical `finding_id` per Tejaswi's directive.
 - **Task 9 (`7ed970b`)**: Created outreach briefing packs (`docs/outreach/`) and centralized tracking matrix (`docs/HUMAN_ACTIONS.md`).
 - **Package Polish (`885c114`)**: Exported `section_matches` and `SectionMatchResult` from `app.statutes`.
 
@@ -144,7 +144,7 @@ The document state machine enforces strict lifecycle transitions:
 - **Location**: `backend/app/schemas/finding.py`, `backend/app/findings/`
 - **Purpose**: Defines the universal schema contract for findings across all pipeline layers.
 - **Core Model**: `Finding`
-  - `id`: UUID (with temporary backward-compatibility alias `ID_ALIAS_UNTIL = 2026-11-22`).
+  - `finding_id`: UUID (canonical identifier; deprecated `id` alias permanently removed per Tejaswi's decision).
   - `document_id`, `document_version_id`: Tenancy and version bindings.
   - `layer`: Enum (`COMPLETENESS`, `STATUTORY`, `CONSISTENCY`, `RISK_ASYMMETRY`).
   - `severity`: Enum (`CRITICAL`, `HIGH`, `MEDIUM`, `LOW`, `INFO`).

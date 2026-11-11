@@ -29,12 +29,12 @@ Per release guidelines, migrations must be executed sequentially:
 
 ---
 
-## 3. Date Reminders & Deprecation Guards
+## 3. Deprecation of Finding `id` Alias
 
-1. **`ID_ALIAS_UNTIL` (2026-11-15)**:
-   - Added automated guard test in `backend/tests/test_finding_views.py`: `test_id_alias_7_day_expiration_guard`.
-   - The test will fail in CI starting on **November 8, 2026** (7 days prior to deadline) to ensure the team removes the deprecated `id` alias property or deliberately extends the date with team alignment.
-   - The date itself was not altered.
+1. **`id` Alias Removal**:
+   - Per Tejaswi's directive to remove rather than extend, the deprecated `id` alias and `ID_ALIAS_UNTIL` have been completely removed from `backend/app/findings/schemas.py` (merged from `origin/arjun-alias`, commit `eec4e08`).
+   - All response schemas now identify findings strictly by `finding_id`.
+   - All tests have been updated and verified green.
 
 ---
 
@@ -48,5 +48,5 @@ The PR includes:
 - Task 5: `section_matches()` implementation & `docs/statutes_matching_rule.md`.
 - Task 6: PII redaction regex hardening (currencies, dates, clause numbers, invoice IDs), retry on garbled placeholders, and DPDP scope notice.
 - Task 7: Safe failure surfaces: R7 `side_unknown=True` on `side=None`, R7/R9 `provisional=True` flags, R1/R10 `review_status` schema propagation.
-- Task 8: 7-day expiration guard test for `ID_ALIAS_UNTIL`.
+- Task 8: Finding `id` alias removal per Tejaswi's directive (merged from `origin/arjun-alias`, `eec4e08`).
 - Task 9: Human actions tracking table and outreach packs.

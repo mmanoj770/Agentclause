@@ -94,6 +94,18 @@ def run(client, tokens: dict, ctx: dict) -> None:
     if not migration_18_applied():
         return
 
+    # 0b. two routes the bundle hardened. A server without the bundle fails these on purpose: before it,
+    # any role could call POST /reviews. Neither request writes anything or reaches a model.
+    r = client.post("/reviews", headers=law, json={"contract_text": "Dry-run text, not a contract.",
+                                                    "contract_type_id": "nda"})
+    report("0", "POST /reviews is closed to a lawyer (403)", r.status_code == 403, detail(r))
+    # While the server has no model key this is the handled 503 (inert, nothing leaves the server). It
+    # will fail once a key is set; change this step then.
+    r = client.post("/intake/normalize", headers=a, json={"contract_text": "Dry-run text, not a contract.",
+                                                           "contract_type_id": "nda"})
+    report("0", "signed-in /intake/normalize answers the handled 503 (no model key on the server)",
+           r.status_code == 503 and "Dry-run text" not in r.text, detail(r))
+
     # 1. startup A uploads a contract
     made = e2e.upload_new_document(client, a, "1", "A")
     if made is None:

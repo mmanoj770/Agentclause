@@ -3,7 +3,7 @@
 **Status as of**: 8 November 2026 (19:10 IST)  
 **Repository Branch**: `blockers-prep` (Commit `08acbce`, pushed to `origin/blockers-prep`)  
 **Base Commit**: `origin/main` (`41fbc94`)  
-**Backend Test Suite**: **994 passed, 38 skipped, 0 failed** in 12.40s (31 access test skips needing live tokens + 7 known skipped tests)  
+**Backend Test Suite**: **1041 passed, 38 skipped, 0 failed** in 22.75s (31 access test skips needing live tokens + 7 known skipped tests)  
 **Live Database**: Supabase (`pmrkwctwjqhrhkwtjrbz`, `ap-south-1` Mumbai) · 21 migrations live and verified  
 **Authentication State**: **Legacy API keys disabled on live** · Publishable key (`sb_publishable_...`) active
 
@@ -55,7 +55,7 @@
 | **Database** | Live & healthy | 21 migrations live. Migrations 20 & 22 queued for deploy window. |
 | **Review Agent (R1–R11)** | Complete in code | Demo mode 100% operational; Strict mode fails safe pending advocate sign-offs. |
 | **Blockers Branch** | `blockers-prep` (`08acbce`) | 18 commits ahead of `main`; PR ready for review and merge. |
-| **Test Suite** | **994 passed, 38 skipped, 0 failed** | Zero failures permitted; full suite green in 12.40s. |
+| **Test Suite** | **1041 passed, 38 skipped, 0 failed** | Zero failures permitted; full suite green in 22.75s. |
 | **Advocate Review Pack** | Prepared & guarded | `advocate_review_pack.csv` ready; atomic `apply_advocate_review.py` guarded. |
 | **Human Actions Matrix** | Fully mapped | Tracked in `docs/HUMAN_ACTIONS.md` across Advocate, Tejaswi, Arjun, Poornaa, Compliance, Counsel. |
 
@@ -142,5 +142,5 @@ Every engineering blocker that can be resolved in code has been completed. The r
 - **Test Suite Verification**:
   ```bash
   cd backend && PYTHONPATH=. .venv/bin/pytest -q tests
-  # 994 passed, 38 skipped, 0 failed in 12.40s
+  # 1041 passed, 38 skipped, 0 failed in 22.75s
   ```

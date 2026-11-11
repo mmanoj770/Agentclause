@@ -53,6 +53,13 @@ def pytest_terminal_summary(terminalreporter):
         )
 
 
+@pytest.fixture(autouse=True)
+def _reset_intake_limiter():
+    """The intake rate limiter is process-wide. Without this, tests that post as the same user would trip it."""
+    from app.intake.limits import limiter
+    limiter.reset()
+    yield
+
 @pytest.fixture(scope="session")
 def client():
     with TestClient(app) as c:

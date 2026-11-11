@@ -9,6 +9,7 @@ from contextlib import contextmanager
 from app.agents import citation_gate, fixtures, service
 from app.pipeline import runner
 from app.auth.dependencies import CurrentUser, get_current_user
+from app.config import settings
 from app.db import get_conn
 from app.main import app
 from app.schemas.finding import INSERT_COLUMNS, Finding
@@ -89,6 +90,7 @@ class GateAudit:
 
 @pytest.fixture
 def env(monkeypatch):
+    monkeypatch.setattr(settings, "review_mode", "pipeline")   # these tests are about the real pipeline's route
     conn = FakeConn()
     conn.gate_audit = GateAudit()
     monkeypatch.setattr(citation_gate, "_pool_connection", conn.gate_audit.connection)

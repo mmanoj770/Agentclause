@@ -86,9 +86,20 @@ def download_name(key: str) -> str:
     return _UUID_PREFIX.sub("", key.rsplit("/", 1)[-1]) or "file"
 
 
-def read_object(s3, key: str) -> bytes:
-    """The stored file's bytes, for server-side processing (the review pipeline reads contracts this way)."""
-    return s3.get_object(Bucket=settings.s3_bucket, Key=key)["Body"].read()
+class ObjectTooLargeError(ValueError):
+    """The stored file is bigger than the size cap for server-side reads."""
+
+
+def read_object(s3, key: str, max_bytes: int | None = None) -> bytes:
+    """The stored file's bytes, for server-side processing (the review pipeline reads contracts this way).
+
+    Reads at most max_bytes (default: the upload cap) plus one byte, so an oversized or replaced object
+    cannot be pulled into memory whole; raises ObjectTooLargeError past the cap."""
+    limit = settings.max_upload_bytes if max_bytes is None else max_bytes
+    data = s3.get_object(Bucket=settings.s3_bucket, Key=key)["Body"].read(limit + 1)
+    if len(data) > limit:
+        raise ObjectTooLargeError(f"stored file is larger than the {limit}-byte limit")
+    return data
 
 
 def create_download(s3, key: str) -> str:

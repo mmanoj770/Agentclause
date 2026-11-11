@@ -9,7 +9,9 @@ from uuid import UUID
 from fastapi import APIRouter, BackgroundTasks, Depends
 from pydantic import BaseModel, Field
 
-from app.agents import service
+from app.agents import service, stub_review
+from app.config import settings
+from app.documents.service import get_document
 from app.pipeline import runner
 from app.auth.dependencies import CurrentUser, get_current_user, require_role
 from app.db import get_conn
@@ -51,8 +53,12 @@ def review(doc_id: UUID, background: BackgroundTasks, user: CurrentUser = Depend
            conn=Depends(get_conn)):
     """Start the AI review (R10). It runs in the background; poll GET /documents/{id} for the state:
     pending_lawyer_review when it finished, back to the starting state if it failed."""
+    stub = settings.review_mode == "stub"
+    if stub:
+        stub_review.require_stub_doc_type(get_document(conn, doc_id, user))
     started = runner.start_review(conn, user, doc_id)
-    background.add_task(runner.run_pipeline, doc_id, started["version_id"], started["from_state"])
+    background.add_task(stub_review.run_stub_review if stub else runner.run_pipeline,
+                        doc_id, started["version_id"], started["from_state"])
     return {"state": started["state"], "version_no": started["version_no"]}
 
 

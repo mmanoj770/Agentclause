@@ -173,3 +173,23 @@ def test_queue_service_includes_provisional_flags():
     assert items[0]["provisional"] is True
     assert "provisional_reason" in items[0]
 
+
+def test_queue_sorting_by_triage_tier_orders_senior_counsel_enhanced_standard():
+    from app.lawyer_queue.service import ORDER_TRIAGE_TIER, list_queue
+    from unittest.mock import MagicMock
+
+    # Must match migration 04 check constraint values (standard, enhanced, senior_counsel), not 'critical'
+    assert "when 'senior_counsel' then 1" in ORDER_TRIAGE_TIER
+    assert "when 'enhanced' then 2" in ORDER_TRIAGE_TIER
+    assert "when 'standard' then 3" in ORDER_TRIAGE_TIER
+    assert "'critical'" not in ORDER_TRIAGE_TIER
+
+    mock_conn = MagicMock()
+    mock_conn.execute.return_value.fetchall.return_value = []
+    mock_user = MagicMock(id="lawyer-1")
+
+    list_queue(mock_conn, mock_user, sort_by="triage_tier")
+    executed_sql = mock_conn.execute.call_args[0][0]
+    assert "senior_counsel" in executed_sql
+
+

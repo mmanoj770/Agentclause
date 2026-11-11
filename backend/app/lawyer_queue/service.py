@@ -25,7 +25,7 @@ limit %s
 ORDER_QUEUED_AT = "d.queued_at asc, d.id asc"
 ORDER_TRIAGE_TIER = """
 case d.triage_tier
-  when 'critical' then 1
+  when 'senior_counsel' then 1
   when 'enhanced' then 2
   when 'standard' then 3
   else 4

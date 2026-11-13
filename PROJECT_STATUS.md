@@ -1,29 +1,28 @@
 # AgentClause: Project Status (Backend & Review Agent)
 
-**Status as of**: 8 November 2026 (19:10 IST)  
-**Repository Branch**: `blockers-prep` (Commit `08acbce`, pushed to `origin/blockers-prep`)  
-**Base Commit**: `origin/main` (`41fbc94`)  
-**Backend Test Suite**: **1041 passed, 38 skipped, 0 failed** in 22.75s (31 access test skips needing live tokens + 7 known skipped tests)  
+**Status as of**: 13 November 2026 (18:15 IST)  
+**Repository Branch**: `blockers-prep` (Commit `69e2224`, pushed to `origin/blockers-prep`)  
+**Base Commit**: `origin/main` (`ca742ab`)  
+**Backend Test Suite**: **1041 passed, 38 skipped, 0 failed** in 16.43s (31 access test skips needing live tokens + 7 known skipped tests)  
 **Live Database**: Supabase (`pmrkwctwjqhrhkwtjrbz`, `ap-south-1` Mumbai) · 21 migrations live and verified  
-**Authentication State**: **Legacy API keys disabled on live** · Publishable key (`sb_publishable_...`) active
+**Authentication State**: **Legacy API keys permanently revoked on live** · Publishable & secret keys active
 
 ---
 
 ## Executive Summary
 
-1. **Legacy Key Disable Window (8 Nov 2026, 19:00–19:06 IST) — 100% PASS**:
-   - **Legacy Keys Disabled**: Both the legacy `anon` (`eyJ...`) and legacy `service_role` (`eyJ...`) keys were disabled via toggle in the Supabase Dashboard.
-   - **Local Environment Cutover**: `.env.local` and `.env.local.backup` were cleanly switched over to the new Supabase publishable key (`sb_publishable_CL7UK...`) with zero references to the legacy key remaining.
-   - **Live Smoke & Isolation Verification**:
-     - **Client Sign-in**: Fresh login succeeded; document upload and document list pages loaded cleanly.
-     - **Advocate Sign-in**: Private-window login succeeded; dashboard and consultation request views loaded cleanly.
-     - **`scripts/e2e_upload.py`**: **ALL PASS** (Tenant A and B uploads verified; cross-org upload-url, confirm, and download-url strictly refused with 403/404 in both directions with zero version leakage).
-     - **`scripts/dry_run.py`**: **ALL PASS** (Full pipeline review, lawyer sign-off, client view sanitization, chat, and audit logging all passed; role permissions strictly enforced preventing lawyer from marking `delivered` with 403).
-   - **Cleanup Tracking**: 3 test documents identified and tracked for post-window cleanup:
-     1. `cd8387e9-10a3-4aa5-a98f-123779109df6`
-     2. `26df2e7b-1128-461b-acd6-1ceaf24bb65b`
-     3. `f009e905-ac8e-471d-9b2f-ae5ab1f298fb`
-   - **Revocation Status**: Keys remain disabled overnight without incident; Arjun reviewing server logs tomorrow morning (Mon 9 Nov) before permanent revocation is scheduled.
+1. **Legacy Key Permanent Revocation Window (13 Nov 2026, 18:03 IST) — 100% PASS**:
+   - **Permanent Revocation**: Both legacy keys (`legacy anon key` and `legacy service_role key`, `eyJ...`) were permanently revoked in the Supabase Dashboard following zero-error journal checks.
+   - **Active Keys**: New Supabase publishable key (`sb_publishable_...`) and secret key (`sb_secret_...`) remain active and untouched.
+   - **Post-Revoke Verification Runs (ALL PASS)**:
+     - **Client & Lawyer Logins**: Both succeed; role-specific pages (client documents, lawyer dashboard) open cleanly.
+     - **`scripts/e2e_upload.py`**: **ALL PASS** (Tenant isolation, upload, confirm, and download verified).
+     - **`scripts/dry_run.py`**: **ALL PASS** (Full pipeline review, adjudication, client view sanitization, chat, and audit trails verified).
+   - **Cleanup Tracking**: 9 total test documents tracked for post-cutover purge:
+     - *8 Nov Disable Window*: `cd8387e9-10a3-4aa5-a98f-123779109df6`, `26df2e7b-1128-461b-acd6-1ceaf24bb65b`, `f009e905-ac8e-471d-9b2f-ae5ab1f298fb`
+     - *13 Nov Morning Run*: `f18f7098-61fa-48cb-8778-a4219cfceb43`, `2d069bfd-6836-46e4-b408-be689b09e4ab`, `24dc0acb-c972-4e5c-943b-aa3af9068081`
+     - *13 Nov Post-Revoke Run*: `68c9846c-9f71-4fcb-bac2-f0bf9522a6c4` (org 38e5b713, e2e_upload, startup A), `02e29fa0-8e31-431f-ae92-79b5d4680568` (org 276f9768, e2e_upload, startup B), `fc7f9b4c-fdb1-46a1-9e4c-9dd65a375f69` (org 38e5b713, dry_run, startup A)
+   - **Next Maintenance Window**: Step 2 scheduled for Saturday 14 Nov 2026, 19:00–20:00 IST (JWT secret removal and Site URL configuration).
 
 2. **Review Agent (R1–R11) Operational Status**:
    - The entire Review Agent pipeline is merged, tested, and runnable end-to-end.
@@ -93,8 +92,8 @@ Every engineering blocker that can be resolved in code has been completed. The r
    - Review and merge branch `blockers-prep` into `main` ([PR Link](https://github.com/mmanoj770/Agentclause/pull/new/blockers-prep)).
 4. **Merge C9 Chat Endpoint**:
    - Merge `origin/tejaswi` to connect the real conversational chat endpoint after deploy window.
-5. **Permanent Key Revocation**:
-   - Execute permanent revocation of legacy keys in Supabase dashboard 24–48 hours post-disable (Tue 10 Nov).
+5. **Permanent Key Revocation - COMPLETE**:
+   - Permanently revoked both legacy keys (`legacy anon` and `legacy service_role`) in Supabase dashboard (Fri 13 Nov 2026, 18:03 IST). All post-revoke verification runs (client/lawyer logins, `e2e_upload.py`, `dry_run.py`) passed cleanly.
 
 ### B. Advocate (Legal Counsel)
 1. **Statutory Quote Verification (`HA-01`)**:
@@ -125,10 +124,19 @@ Every engineering blocker that can be resolved in code has been completed. The r
 
 ### G. Engineering / Manoj
 1. **Test Document Cleanup**:
-   - Purge the 3 test documents created during tonight's window:
-     - `cd8387e9-10a3-4aa5-a98f-123779109df6`
-     - `26df2e7b-1128-461b-acd6-1ceaf24bb65b`
-     - `f009e905-ac8e-471d-9b2f-ae5ab1f298fb`
+   - Purge the 9 test documents created across testing windows:
+     - *8 Nov Disable Window (3 docs)*:
+       - `cd8387e9-10a3-4aa5-a98f-123779109df6`
+       - `26df2e7b-1128-461b-acd6-1ceaf24bb65b`
+       - `f009e905-ac8e-471d-9b2f-ae5ab1f298fb`
+     - *13 Nov Morning Run (3 docs)*:
+       - `f18f7098-61fa-48cb-8778-a4219cfceb43`
+       - `2d069bfd-6836-46e4-b408-be689b09e4ab`
+       - `24dc0acb-c972-4e5c-943b-aa3af9068081`
+     - *13 Nov Post-Revoke Run (3 docs)*:
+       - `68c9846c-9f71-4fcb-bac2-f0bf9522a6c4` (org 38e5b713, e2e_upload, startup A)
+       - `02e29fa0-8e31-431f-ae92-79b5d4680568` (org 276f9768, e2e_upload, startup B)
+       - `fc7f9b4c-fdb1-46a1-9e4c-9dd65a375f69` (org 38e5b713, dry_run, startup A)
 2. **Deprecate Finding `id` Alias (`HA-11`) - COMPLETE**:
    - Permanently removed `id` property from `_FindingId` in `backend/app/findings/schemas.py` and dropped `ID_ALIAS_UNTIL` per Tejaswi's directive (merged from `origin/arjun-alias`, `eec4e08`). Tests updated to require `finding_id` only.
 

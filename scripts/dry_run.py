@@ -145,11 +145,6 @@ def run(client, tokens: dict, ctx: dict) -> None:
     stub = bool(created_rows) and bool(created_rows[-1]["details"].get("layers", {}).get("stub_review", {}).get("stub"))
     report("3", "findings_created recorded (stub mode: sample findings; pipeline: 0 is expected while every "
                 "rule is unverified)", bool(created_rows), f"mode {'stub' if stub else 'pipeline'}, stored {created}, blocked {blocked}")
-    if stub:
-        findings_now = client.get(f"/documents/{doc}/findings", headers=law).json() or []
-        report("3", "stub mode: every stored finding is labelled [STUB]",
-               bool(findings_now) and all(str(i.get("description", "")).startswith("[STUB] ") for i in findings_now),
-               f"{len(findings_now)} findings")
 
     # 4. before sign-off the client view refuses, and shows nothing
     r = client.get(f"/documents/{doc}/client-findings", headers=a)
@@ -169,6 +164,10 @@ def run(client, tokens: dict, ctx: dict) -> None:
     items = r.json() if r.status_code == 200 else []
     report("6", "lawyer lists the findings", r.status_code == 200 and len(items) == created,
            detail(r) if r.status_code != 200 else f"{len(items)} item(s)")
+    if stub:   # the lawyer can only read a document's findings once they have claimed it (step 5)
+        report("6", "stub mode: every stored finding is labelled [STUB]",
+               bool(items) and all(str(i.get("description", "")).startswith("[STUB] ") for i in items),
+               f"{len(items)} findings")
     report("6", "all are origin=agent, with a finding_id, a layer name and a citation_type",
            all(i["origin"] == "agent" and i["finding_id"] and i["layer"] and i["citation_type"]
                for i in items))
